@@ -1,5 +1,6 @@
 const pool = require('../../db/config');
 const { verifyAccessToken } = require('../utils/tokens');
+const { USER_SELECT, USER_FROM } = require('../utils/userQuery');
 
 // Protects a route. Expects "Authorization: Bearer <accessToken>".
 // On success, sets req.user = { id, email, role, ... } (never includes the password).
@@ -28,7 +29,7 @@ async function authenticate(req, res, next) {
 
   try {
     const { rows } = await pool.query(
-      'SELECT id, email, first_name, last_name, phone, role FROM users WHERE id = $1',
+      `SELECT ${USER_SELECT} ${USER_FROM} WHERE u.id = $1`,
       [payload.sub]
     );
     if (rows.length === 0) {
