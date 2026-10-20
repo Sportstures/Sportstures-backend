@@ -15,6 +15,8 @@ app.get('/health', (req, res) => {
   res.status(200).json({ message: 'Server is running', timestamp: new Date() });
 });
 
+app.use('/api/auth', require('./routes/auth'));
+
 // Routes placeholder (to be implemented)
 // app.use('/api/users', require('./routes/users'));
 // app.use('/api/coaches', require('./routes/coaches'));
