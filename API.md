@@ -29,7 +29,7 @@ Every error has the same shape:
 | 403 | `FORBIDDEN` | Logged in but role not allowed |
 | 400 | `UNKNOWN_SPORT` | `sport.name` is not in `GET /api/sports` |
 | 409 | `EMAIL_TAKEN` | Email already registered |
-| 429 | `TOO_MANY_REQUESTS` | Rate limited (20 register/login attempts per 15 min per IP) |
+| 429 | `TOO_MANY_REQUESTS` | Rate limited (20 register/login attempts per 15 min per IP, configurable with `AUTH_RATE_LIMIT_MAX`) |
 
 ## Auth
 
@@ -73,7 +73,7 @@ One request carries all four signup steps, so the app collects the steps locally
 | `role` | no | `learner` (default) or `coach`. `admin` is rejected |
 | `school` | no | `name` (text, created if new, matched ignoring case), `grade` (number 1 to 12, send `9` not `"Grade 9"`), `className` |
 | `sport` | no | Skip the whole object if the user skips step 3. `name` must be one from `GET /api/sports`. `jerseyNumber` 0 to 999 |
-| `coach` | no | Only used when `role` is `coach`: `specialization`, `yearsOfExperience`, `certification`, `bio` |
+| `coach` | no | Only used when `role` is `coach`. See "Coach signup" below |
 
 The whole signup is saved together or not at all.
 
@@ -93,14 +93,48 @@ Response `201`:
 }
 ```
 
-`profile` is `null` when no school or sport was given. For coaches it holds the coach details
-(`specialization`, `yearsOfExperience`, `certification`, `bio`).
+`profile` is `null` when no school or sport was given. For coaches it holds the coach details (below).
 The mobile "confirm password" field is checked in the app only and is not sent.
+
+#### Coach signup
+
+Send `"role": "coach"` plus the personal fields above, and a `coach` object from the coach steps
+(Coaching, Sports). Every field is optional at the API; the app enforces what is required.
+
+```json
+{
+  "email": "coach@example.com", "password": "Passw0rdOK", "role": "coach",
+  "firstName": "Sipho", "lastName": "Williams", "dateOfBirth": "1985-03-02", "gender": "male",
+  "coach": {
+    "school": "Jeppe High School",
+    "teamName": "Basketball Boys",
+    "teamLevel": "1st Team",
+    "coachingRole": "Head Coach",
+    "experience": "5 - 10 years",
+    "sports": ["Basketball", "Swimming"]
+  }
+}
+```
+
+- `school` is a plain string (matched ignoring case, created if new).
+- `teamLevel`, `coachingRole` and `experience` are stored exactly as sent (the dropdown text), so a new dropdown option needs no backend change.
+- `sports` is a list of names from `GET /api/sports`; duplicates are ignored and an unknown name returns `UNKNOWN_SPORT`.
+
+The coach `profile` in the response:
+
+```json
+{ "school": { "id": 1, "name": "Jeppe High School" }, "teamName": "Basketball Boys", "teamLevel": "1st Team",
+  "coachingRole": "Head Coach", "experience": "5 - 10 years",
+  "sports": [{ "id": 2, "name": "Basketball" }, { "id": 10, "name": "Swimming" }] }
+```
 
 ### GET /api/sports
 
-Public. Response `200`: `{ "sports": [{ "id": 1, "name": "Athletics" }, ...] }`.
-Use this to fill the sport dropdown so the app and website never drift from the backend list.
+Public. Response `200`: `{ "sports": [{ "id": 1, "name": "Athletics" }, ...] }`. It currently has 10 sports:
+Athletics, Basketball, Cricket, Football, Hockey, Netball, Rugby, Swimming, Tennis, Volleyball.
+Use this to fill the sport dropdowns (learner and coach) so the app and website never drift from the backend list.
+The learner signup list in the app has no Swimming and the coach list has no Tennis or Volleyball, so both
+should load from this endpoint.
 
 ### POST /api/auth/login
 

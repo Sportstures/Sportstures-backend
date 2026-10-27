@@ -7,9 +7,10 @@ const { authenticate } = require('../middleware/auth');
 const router = express.Router();
 
 // Slows down password guessing and mass sign-ups from one IP.
+// Set AUTH_RATE_LIMIT_MAX in .env to raise it while developing (default 20 per 15 minutes).
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 20,
+  limit: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many attempts, try again later' } },
@@ -87,12 +88,21 @@ router.post(
     body('sport.level').optional({ values: 'falsy' }).isString().trim().isLength({ max: 50 })
       .withMessage('sport.level must be 50 characters or fewer'),
 
-    // Coach details (only used when role is coach)
+    // Coach signup (only used when role is coach)
     body('coach').optional({ values: 'null' }).isObject().withMessage('coach must be an object'),
-    body('coach.specialization').optional({ values: 'falsy' }).isString().trim().isLength({ max: 100 }),
-    body('coach.yearsOfExperience').optional({ values: 'null' }).isInt({ min: 0, max: 80 }).toInt(),
-    body('coach.certification').optional({ values: 'falsy' }).isString().trim().isLength({ max: 255 }),
-    body('coach.bio').optional({ values: 'falsy' }).isString().trim().isLength({ max: 2000 }),
+    body('coach.school').optional({ values: 'falsy' }).isString().trim().isLength({ min: 1, max: 255 })
+      .withMessage('coach.school must be 1 to 255 characters'),
+    body('coach.teamName').optional({ values: 'falsy' }).isString().trim().isLength({ max: 100 })
+      .withMessage('coach.teamName must be 100 characters or fewer'),
+    body('coach.teamLevel').optional({ values: 'falsy' }).isString().trim().isLength({ max: 50 })
+      .withMessage('coach.teamLevel must be 50 characters or fewer'),
+    body('coach.coachingRole').optional({ values: 'falsy' }).isString().trim().isLength({ max: 50 })
+      .withMessage('coach.coachingRole must be 50 characters or fewer'),
+    body('coach.experience').optional({ values: 'falsy' }).isString().trim().isLength({ max: 50 })
+      .withMessage('coach.experience must be 50 characters or fewer'),
+    body('coach.sports').optional({ values: 'null' }).isArray({ max: 20 })
+      .withMessage('coach.sports must be a list of sport names'),
+    body('coach.sports.*').isString().trim().isLength({ min: 1, max: 100 }),
   ],
   validate,
   controller.register

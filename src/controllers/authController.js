@@ -53,16 +53,28 @@ async function loadProfile(user) {
 
   if (user.role === 'coach') {
     const { rows } = await pool.query(
-      'SELECT specialization, years_of_experience, certification, bio FROM coaches WHERE user_id = $1',
+      `SELECT c.id, c.team_name, c.team_level, c.coaching_role, c.experience,
+              s.id AS school_id, s.name AS school_name
+         FROM coaches c
+         LEFT JOIN schools s ON s.id = c.school_id
+        WHERE c.user_id = $1`,
       [user.id]
     );
     const c = rows[0];
     if (!c) return null;
+    const sports = await pool.query(
+      `SELECT sp.id, sp.name FROM coach_sports cs
+         JOIN sports sp ON sp.id = cs.sport_id
+        WHERE cs.coach_id = $1 ORDER BY sp.name`,
+      [c.id]
+    );
     return {
-      specialization: c.specialization,
-      yearsOfExperience: c.years_of_experience,
-      certification: c.certification,
-      bio: c.bio,
+      school: c.school_id ? { id: c.school_id, name: c.school_name } : null,
+      teamName: c.team_name,
+      teamLevel: c.team_level,
+      coachingRole: c.coaching_role,
+      experience: c.experience,
+      sports: sports.rows,
     };
   }
 
@@ -102,6 +114,18 @@ async function register(req, res, next) {
       sportId = found.rows[0].id;
     }
 
+    // A coach can coach several sports; each must be a known sport.
+    const coachSportIds = [];
+    if (role === 'coach' && Array.isArray(coach?.sports)) {
+      for (const name of new Set(coach.sports.map((s) => String(s).toLowerCase()))) {
+        const found = await pool.query('SELECT id FROM sports WHERE lower(name) = $1', [name]);
+        if (!found.rows[0]) {
+          return res.status(400).json(errorBody('UNKNOWN_SPORT', `Unknown sport "${name}", use GET /api/sports for valid names`));
+        }
+        coachSportIds.push(found.rows[0].id);
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     client = await pool.connect();
@@ -134,12 +158,20 @@ async function register(req, res, next) {
         );
       }
     } else if (role === 'coach') {
-      await client.query(
-        `INSERT INTO coaches (user_id, specialization, years_of_experience, certification, bio)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [userId, coach?.specialization || null, coach?.yearsOfExperience ?? null,
-          coach?.certification || null, coach?.bio || null]
+      const schoolId = coach?.school ? await findOrCreateSchool(client, coach.school) : null;
+      const coachRow = await client.query(
+        `INSERT INTO coaches (user_id, school_id, team_name, team_level, coaching_role, experience)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id`,
+        [userId, schoolId, coach?.teamName || null, coach?.teamLevel || null,
+          coach?.coachingRole || null, coach?.experience || null]
       );
+      for (const sportIdToAdd of coachSportIds) {
+        await client.query('INSERT INTO coach_sports (coach_id, sport_id) VALUES ($1, $2)', [
+          coachRow.rows[0].id,
+          sportIdToAdd,
+        ]);
+      }
     }
 
     await client.query('COMMIT');
