@@ -28,7 +28,10 @@ Every error has the same shape:
 | 401 | `REFRESH_TOKEN_EXPIRED` | Refresh token expired: log in again |
 | 403 | `FORBIDDEN` | Logged in but role not allowed |
 | 400 | `UNKNOWN_SPORT` | `sport.name` is not in `GET /api/sports` |
+| 400 | `SAME_TEAM` / `SPORT_MISMATCH` / `UNKNOWN_COMPETITION` | Fixture rules, see Fixtures |
+| 404 | `NOT_FOUND` | No team or fixture with that id |
 | 409 | `EMAIL_TAKEN` | Email already registered |
+| 409 | `COMPETITION_EXISTS` / `FIXTURE_LOCKED` | Duplicate competition name, or editing a live/finished fixture |
 | 429 | `TOO_MANY_REQUESTS` | Rate limited (20 register/login attempts per 15 min per IP, configurable with `AUTH_RATE_LIMIT_MAX`) |
 
 ## Auth
@@ -151,6 +154,123 @@ Body: `{ "refreshToken": "..." }`. Response `200`: `{ "message": "Logged out" }`
 ### GET /api/auth/me (protected)
 
 Response `200`: `{ "user": { ... } }` (same user object as register, including `profile`).
+
+## Teams, competitions and fixtures
+
+All of these need `Authorization: Bearer <accessToken>`. A **team** is one sport at one school, with a level
+(`Varsity`, `U16`, `1st Team`) and a category (`boys`, `girls`, `mixed`). Build the label the screens show,
+e.g. "Boys U19 Soccer", from `genderCategory` + `level` + `sport.name`.
+
+Lists accept `limit` (default 50, max 100) and `offset`.
+
+### Team object
+
+```json
+{ "id": 4, "name": "Basketball Boys", "level": "Varsity", "genderCategory": "boys",
+  "sport": { "id": 2, "name": "Basketball" }, "school": { "id": 1, "name": "Jeppe High" },
+  "coach": { "id": 7, "name": "Sipho Williams" }, "description": null, "location": null, "foundedYear": null }
+```
+
+`coach.id` is the coach's **user id**. `sport`, `school` and `coach` are `null` when not set.
+
+### GET /api/teams
+
+Filters: `sportId`, `schoolId`, `q` (name search), `mine=true` (teams I coach).
+Response: `{ "teams": [...], "limit": 50, "offset": 0 }`.
+
+### GET /api/teams/:id
+
+Response: `{ "team": {...} }`. `404 NOT_FOUND` if missing.
+
+### POST /api/teams (coach or admin)
+
+```json
+{ "name": "Basketball Boys", "sportId": 2, "school": "Jeppe High", "level": "Varsity", "genderCategory": "boys" }
+```
+
+Only `name` is required. A coach's new team is assigned to that coach, and the school defaults to the coach's school.
+`school` is a name (matched ignoring case, created if new). Response `201`: `{ "team": {...} }`.
+
+### PATCH /api/teams/:id (the team's coach, or admin)
+
+Send only the fields to change; send `null` to clear one. `403 FORBIDDEN` for another coach's team.
+
+### GET /api/competitions
+
+Filter: `sportId`. Response:
+
+```json
+{ "competitions": [{ "id": 1, "name": "Gauteng Schools Basketball League", "season": "2026",
+                     "sport": { "id": 2, "name": "Basketball" } }] }
+```
+
+### POST /api/competitions (coach or admin)
+
+Body: `{ "name": "...", "sportId": 2, "season": "2026" }` (only `name` required).
+`409 COMPETITION_EXISTS` if the name already exists (any case).
+
+### Fixture object
+
+```json
+{
+  "id": 10,
+  "matchDate": "2026-11-06T16:00:00.000Z",
+  "status": "scheduled",
+  "venue": "Main Gym",
+  "matchType": "league",
+  "competition": { "id": 1, "name": "Gauteng Schools Basketball League" },
+  "sport": { "id": 2, "name": "Basketball" },
+  "homeTeam": { "id": 4, "name": "Basketball Boys", "level": "Varsity", "genderCategory": "boys",
+                "sport": { "id": 2, "name": "Basketball" }, "school": { "id": 1, "name": "Jeppe High" } },
+  "awayTeam": { "id": 5, "name": "Greenwood Boys", "level": "Varsity", "genderCategory": "boys",
+                "sport": { "id": 2, "name": "Basketball" }, "school": { "id": 3, "name": "Greenwood" } },
+  "score": null
+}
+```
+
+- `matchDate` is always UTC (ends in `Z`). Convert to local time in the app.
+- `status`: `scheduled`, `live`, `finished`, `cancelled` or `postponed`. The app's "Today" label is worked out from `matchDate`.
+- `matchType`: `league`, `semifinal`, `championship` or `friendly`.
+- `score` is `null` until a score exists, then `{ "home": 68, "away": 54 }`.
+- `competition` is `null` for friendlies. To know if a team played at home, compare its id with `homeTeam.id`.
+
+### GET /api/fixtures
+
+| Filter | Meaning |
+|---|---|
+| `when=upcoming` | Not played yet: status scheduled, live or postponed. Soonest first |
+| `when=past` | Played: status finished. Newest first |
+| `teamId` | Fixtures where the team is home or away |
+| `mine=true` | Fixtures for teams I coach (empty for learners for now) |
+| `sportId`, `competitionId`, `status` | Exact filters |
+| `from`, `to` | ISO date-times that bound `matchDate` |
+| `order=asc` or `order=desc` | Overrides the default order |
+
+Response: `{ "fixtures": [...], "limit": 50, "offset": 0 }`.
+
+### GET /api/fixtures/:id
+
+Response: `{ "fixture": {...} }`. `404 NOT_FOUND` if missing.
+
+### POST /api/fixtures (coach or admin)
+
+```json
+{ "homeTeamId": 4, "awayTeamId": 5, "matchDate": "2026-11-06T18:00:00+02:00", "venue": "Main Gym",
+  "competitionId": 1, "matchType": "league" }
+```
+
+- `homeTeamId`, `awayTeamId` and `matchDate` are required. **`matchDate` must include a time zone** (`+02:00` or `Z`).
+- The caller must coach the **home** team (admins can schedule any fixture), otherwise `403 FORBIDDEN`.
+- Errors: `SAME_TEAM` (a team cannot play itself), `SPORT_MISMATCH` (both teams must play the same sport),
+  `UNKNOWN_COMPETITION`, and `404` for an unknown team.
+- Response `201`: `{ "fixture": {...} }`.
+
+### PATCH /api/fixtures/:id (home team's coach, or admin)
+
+Edit `matchDate`, `venue`, `competitionId`, `matchType`, or set `status` to `scheduled`, `postponed` or `cancelled`
+(this is the app's "Cancel fixture" action). Send only what changes; `null` clears `competitionId`.
+`live` and `finished` cannot be set here; they come from match scoring.
+A live or finished fixture returns `409 FIXTURE_LOCKED`.
 
 ## Protecting a new route (for backend developers)
 
