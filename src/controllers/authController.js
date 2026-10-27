@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const pool = require('../../db/config');
 const { signAccessToken, generateRefreshToken, hashToken } = require('../utils/tokens');
 const { USER_SELECT, USER_FROM } = require('../utils/userQuery');
+const { findOrCreateSchool } = require('../utils/schools');
 
 const BCRYPT_ROUNDS = 12;
 
@@ -83,17 +84,6 @@ async function loadProfile(user) {
 
 async function withProfile(user) {
   return { ...user, profile: await loadProfile(user) };
-}
-
-// Finds a school by name (ignoring case) or creates it. Runs inside the register transaction.
-async function findOrCreateSchool(client, name) {
-  const inserted = await client.query(
-    'INSERT INTO schools (name) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id',
-    [name]
-  );
-  if (inserted.rows[0]) return inserted.rows[0].id;
-  const existing = await client.query('SELECT id FROM schools WHERE lower(name) = lower($1)', [name]);
-  return existing.rows[0].id;
 }
 
 async function register(req, res, next) {
