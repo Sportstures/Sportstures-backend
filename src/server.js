@@ -16,6 +16,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/sports', require('./routes/sports'));
 
 // Routes placeholder (to be implemented)
 // app.use('/api/users', require('./routes/users'));
