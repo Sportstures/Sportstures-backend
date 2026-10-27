@@ -1,7 +1,8 @@
 const express = require('express');
-const { body, validationResult } = require('express-validator');
+const { body } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const controller = require('../controllers/authController');
+const validate = require('../middleware/validate');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
@@ -15,19 +16,6 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many attempts, try again later' } },
 });
-
-function validate(req, res, next) {
-  const result = validationResult(req);
-  if (result.isEmpty()) return next();
-
-  res.status(400).json({
-    error: {
-      code: 'VALIDATION_ERROR',
-      message: 'Invalid input',
-      details: result.array().map((e) => ({ field: e.path, message: e.msg })),
-    },
-  });
-}
 
 const emailRule = body('email')
   .isEmail().withMessage('A valid email is required')
