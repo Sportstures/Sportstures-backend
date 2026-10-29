@@ -1,9 +1,11 @@
 const nodemailer = require('nodemailer');
+const { contactEmail } = require('./contacts');
+const { crestAttachment } = require('../emails/layout');
+const { verificationCodeEmail } = require('../emails/verificationCode');
 
-async function sendVerificationCode(email, otp) {
+function createTransport() {
   const host = process.env.SMTP_HOST;
-  const from = process.env.SMTP_FROM;
-  if (!host || !from) {
+  if (!host || !process.env.SMTP_FROM) {
     throw new Error('SMTP_HOST and SMTP_FROM must be configured to send verification emails');
   }
 
@@ -27,14 +29,24 @@ async function sendVerificationCode(email, otp) {
     };
   }
 
-  const transporter = nodemailer.createTransport(transportOptions);
-  await transporter.sendMail({
-    from,
-    to: email,
-    subject: 'Your Sportstures verification code',
-    text: `Your Sportstures verification code is ${otp}. It expires in 10 minutes.`,
-    html: `<p>Your Sportstures verification code is:</p><p><strong>${otp}</strong></p><p>It expires in 10 minutes.</p>`,
+  return nodemailer.createTransport(transportOptions);
+}
+
+// Sends a branded email from no-reply. Replies go to the support mailbox instead.
+async function sendEmail({ to, subject, text, html }) {
+  await createTransport().sendMail({
+    from: process.env.SMTP_FROM,
+    replyTo: contactEmail('support'),
+    to,
+    subject,
+    text,
+    html,
+    attachments: [crestAttachment],
   });
 }
 
-module.exports = { sendVerificationCode };
+async function sendVerificationCode(email, otp, { firstName, expiresInMinutes } = {}) {
+  await sendEmail({ to: email, ...verificationCodeEmail({ otp, firstName, expiresInMinutes }) });
+}
+
+module.exports = { sendEmail, sendVerificationCode };

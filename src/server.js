@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
+const { contactEmail } = require('./utils/contacts');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -15,6 +16,13 @@ app.get('/health', (req, res) => {
   res.status(200).json({ message: 'Server is running', timestamp: new Date() });
 });
 
+// Standard file that tells security researchers where to report issues (RFC 9116).
+app.get('/.well-known/security.txt', (req, res) => {
+  const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+  res.type('text/plain').send(`Contact: mailto:${contactEmail('security')}\nExpires: ${expires}\nPreferred-Languages: en\n`);
+});
+
+app.use('/api/contact', require('./routes/contact'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sports', require('./routes/sports'));
 app.use('/api/competitions', require('./routes/competitions'));

@@ -1,5 +1,5 @@
 const express = require('express');
-const { body } = require('express-validator');
+const { body, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const controller = require('../controllers/authController');
 const validate = require('../middleware/validate');
@@ -25,34 +25,69 @@ const otpLimiter = rateLimit({
   message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many verification attempts, try again later' } },
 });
 
-function validate(req, res, next) {
-  const result = validationResult(req);
-  if (result.isEmpty()) return next();
-
-  res.status(400).json({
-    error: {
-      code: 'VALIDATION_ERROR',
-      message: 'Invalid input',
-      details: result.array().map((e) => ({ field: e.path, message: e.msg })),
-    },
-  });
-}
-
 const emailRule = body('email')
   .isEmail().withMessage('A valid email is required')
   .isLength({ max: 255 }).withMessage('Email is too long')
-  .normalizeEmail();
+  .trim().toLowerCase();
 
 const refreshTokenRule = body('refreshToken')
   .isString().withMessage('refreshToken is required')
   .notEmpty().withMessage('refreshToken is required');
 
-const isPlayer = (value, { req }) => req.body.role === 'player';
-const isNotPlayer = (value, { req }) => req.body.role !== 'player';
+function validateCoachSignup(req, res, next) {
+  const result = validationResult(req);
+  if (result.isEmpty()) return next();
+
+  const errors = {};
+  for (const error of result.array()) {
+    if (errors[error.path] === undefined) errors[error.path] = error.msg;
+  }
+  return res.status(422).json({ errors });
+}
+
+const coachSignupRules = [
+  body('firstName').isString().trim().notEmpty().withMessage('Required')
+    .isLength({ max: 100 }).withMessage('Must be 100 characters or fewer'),
+  body('lastName').isString().trim().notEmpty().withMessage('Required')
+    .isLength({ max: 100 }).withMessage('Must be 100 characters or fewer'),
+  body('dateOfBirth').isISO8601({ strict: true, strictSeparator: true }).withMessage('Must be a real YYYY-MM-DD date')
+    .custom((value) => {
+      if (typeof value !== 'string') return true;
+      const [year, month, day] = value.split('-').map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1
+        || date.getUTCDate() !== day || date > new Date()) {
+        throw new Error('Must be a real date and not in the future');
+      }
+      return true;
+    }),
+  body('gender').isIn(['male', 'female']).withMessage('Must be male or female'),
+  body('school').isString().trim().notEmpty().withMessage('Required')
+    .isLength({ max: 255 }).withMessage('Must be 255 characters or fewer'),
+  body('coachingRole').isIn(['head_coach', 'assistant_coach', 'fitness_coach', 'team_manager'])
+    .withMessage('Select a valid coaching role'),
+  body('experience').isIn(['less_than_1_year', '1_3_years', '3_5_years', '5_10_years', '10_plus_years'])
+    .withMessage('Select a valid experience range'),
+  body('team').isObject({ strict: true }).withMessage('Required'),
+  body('team.name').isString().trim().notEmpty().withMessage('Required')
+    .isLength({ max: 100 }).withMessage('Must be 100 characters or fewer'),
+  body('team.level').isIn(['u13', 'u14', 'u15', 'u16', 'u17', 'u19', '1st_team', '2nd_team'])
+    .withMessage('Select a valid team level'),
+  body('team.sport').isString().trim().notEmpty().withMessage('Required')
+    .isLength({ max: 40 }).withMessage('Must be 40 characters or fewer'),
+  body('email').isEmail().withMessage('Must be a valid email address')
+    .isLength({ max: 255 }).withMessage('Must be 255 characters or fewer')
+    .trim().toLowerCase(),
+  body('password').isString().isLength({ min: 8, max: 72 })
+    .withMessage('Must be between 8 and 72 characters'),
+];
+
+const isPlayer = (value, { req }) => ['player', 'learner'].includes(req.body.role);
+const isNotPlayer = (value, { req }) => !['player', 'learner'].includes(req.body.role);
 const hasSport = (value, { req }) => req.body.sport !== undefined && req.body.sport !== null;
 
 const playerRegistrationRules = [
-  body('role').optional().equals('player').withMessage('Only player registration is supported'),
+  body('role').optional().isIn(['player', 'learner']).withMessage('role must be learner'),
   body('firstName').if(isPlayer).isString().trim().notEmpty().withMessage('First name is required')
     .isLength({ max: 100 }).withMessage('First name must be 100 characters or fewer'),
   body('firstName').if(isNotPlayer).optional({ values: 'falsy' }).isString().trim().isLength({ max: 100 }),
@@ -76,7 +111,7 @@ const playerRegistrationRules = [
     .isLength({ max: 255 }).withMessage('School name must be 255 characters or fewer'),
   body('school.grade').if(isPlayer).isInt({ min: 1, max: 12 }).withMessage('Grade must be between 1 and 12').toInt(),
   body('school.className').if(isPlayer).isString().trim().notEmpty().withMessage('Class name is required')
-    .isLength({ max: 100 }).withMessage('Class name must be 100 characters or fewer'),
+    .isLength({ max: 50 }).withMessage('Class name must be 50 characters or fewer'),
   body('sport').if(isPlayer).custom((value) => (
     value == null || (typeof value === 'object' && !Array.isArray(value))
   )).withMessage('Sport must be an object or null'),
@@ -91,6 +126,14 @@ const playerRegistrationRules = [
   body('sport.level').if(hasSport).optional({ values: 'falsy' }).isString().trim().isLength({ max: 50 })
     .withMessage('Level must be 50 characters or fewer'),
 ];
+
+router.post(
+  '/register/coach',
+  authLimiter,
+  coachSignupRules,
+  validateCoachSignup,
+  controller.registerCoach
+);
 
 router.post(
   '/register',
@@ -168,7 +211,10 @@ router.post(
   otpLimiter,
   [
     emailRule,
-    body('otp').isString().matches(/^\d{6}$/).withMessage('OTP must be a 6-digit code'),
+    body('code').custom((value, { req }) => {
+      const submittedCode = value || req.body.otp;
+      return typeof submittedCode === 'string' && /^\d{6}$/.test(submittedCode);
+    }).withMessage('OTP must be a 6-digit code'),
   ],
   validate,
   controller.verifyOtp

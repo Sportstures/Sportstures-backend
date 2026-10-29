@@ -3,6 +3,9 @@ const crypto = require('crypto');
 const pool = require('../../db/config');
 const { signAccessToken, generateRefreshToken, hashToken } = require('../utils/tokens');
 const { sendVerificationCode } = require('../utils/email');
+const { USER_SELECT, USER_FROM } = require('../utils/userQuery');
+const { findOrCreateSchool } = require('../utils/schools');
+const { findOrCreateSport } = require('../utils/sports');
 
 const BCRYPT_ROUNDS = 12;
 const OTP_LENGTH = 6;
@@ -46,33 +49,39 @@ async function registerPlayer(req, res, next) {
   let client;
   let transactionStarted = false;
   try {
-    client = await pool.connect();
     const { email, password, firstName, lastName, dateOfBirth, gender, school, sport } = req.body;
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    client = await pool.connect();
     await client.query('BEGIN');
     transactionStarted = true;
 
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const { rows } = await client.query(
-      `INSERT INTO users (email, password, first_name, last_name, role, email_verified)
-       VALUES ($1, $2, $3, $4, 'player', FALSE)
-       RETURNING id`,
-      [email, passwordHash, firstName, lastName]
+    const { rows: roleRows } = await client.query(
+      'SELECT id FROM roles WHERE name = $1',
+      ['learner']
     );
-    const userId = rows[0].id;
+    if (!roleRows[0]) throw new Error('Learner role is not configured in the roles table');
+
+    const schoolId = await findOrCreateSchool(client, school.name);
+    const sportRecord = sport && sport.name ? await findOrCreateSport(client, sport.name) : null;
+    const { rows: userRows } = await client.query(
+      `INSERT INTO users
+         (email, password, first_name, last_name, date_of_birth, gender, role_id, email_verified)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE)
+       RETURNING id`,
+      [email, passwordHash, firstName, lastName, dateOfBirth, gender, roleRows[0].id]
+    );
+    const userId = userRows[0].id;
 
     await client.query(
-      `INSERT INTO player_profiles
-         (user_id, date_of_birth, gender, school_name, grade, class_name,
-          sport_name, team_name, jersey_number, sport_level)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO learner_profiles
+         (user_id, school_id, grade, class_name, sport_id, team_name, jersey_number, level)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         userId,
-        dateOfBirth,
-        gender,
-        school.name,
+        schoolId,
         school.grade,
         school.className,
-        sport ? sport.name : null,
+        sportRecord ? sportRecord.id : null,
         sport ? sport.teamName || null : null,
         sport && sport.jerseyNumber !== undefined ? sport.jerseyNumber : null,
         sport ? sport.level || null : null,
@@ -81,11 +90,11 @@ async function registerPlayer(req, res, next) {
 
     const otp = generateOtp();
     await saveOtp(client, userId, otp);
-    await sendVerificationCode(email, otp);
+    await sendVerificationCode(email, otp, { firstName, expiresInMinutes: OTP_TTL_MINUTES });
     await client.query('COMMIT');
     transactionStarted = false;
 
-    res.status(201).json({ userId });
+    return res.status(201).json({ userId });
   } catch (err) {
     if (transactionStarted) {
       try {
@@ -98,6 +107,71 @@ async function registerPlayer(req, res, next) {
       return res.status(409).json(errorBody('EMAIL_TAKEN', 'An account with this email already exists'));
     }
     next(err);
+  } finally {
+    if (client) client.release();
+  }
+}
+
+async function registerCoach(req, res, next) {
+  let client;
+  let transactionStarted = false;
+  try {
+    const {
+      email, password, firstName, lastName, dateOfBirth, gender, school,
+      coachingRole, experience, team,
+    } = req.body;
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    client = await pool.connect();
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    const { rows: roleRows } = await client.query(
+      'SELECT id FROM roles WHERE name = $1',
+      ['coach']
+    );
+    if (!roleRows[0]) throw new Error('Coach role is not configured in the roles table');
+
+    const schoolId = await findOrCreateSchool(client, school);
+    const sport = await findOrCreateSport(client, team.sport);
+    const { rows: userRows } = await client.query(
+      `INSERT INTO users
+         (email, password, first_name, last_name, date_of_birth, gender, role_id, email_verified)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE)
+       RETURNING id`,
+      [email, passwordHash, firstName, lastName, dateOfBirth, gender, roleRows[0].id]
+    );
+    const userId = userRows[0].id;
+
+    await client.query(
+      `INSERT INTO coaches (user_id, school_id, team_name, team_level, coaching_role, experience)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [userId, schoolId, team.name, team.level, coachingRole, experience]
+    );
+    await client.query(
+      `INSERT INTO teams (name, coach_id, school_id, sport_id, level)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [team.name, userId, schoolId, sport.id, team.level]
+    );
+
+    const otp = generateOtp();
+    await saveOtp(client, userId, otp);
+    await sendVerificationCode(email, otp, { firstName, expiresInMinutes: OTP_TTL_MINUTES });
+    await client.query('COMMIT');
+    transactionStarted = false;
+
+    return res.status(201).json({ userId, status: 'pending_verification' });
+  } catch (err) {
+    if (transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        return next(rollbackError);
+      }
+    }
+    if (err.code === '23505') {
+      return res.status(409).json(errorBody('EMAIL_TAKEN', 'An account with this email already exists'));
+    }
+    return next(err);
   } finally {
     if (client) client.release();
   }
@@ -145,27 +219,35 @@ async function loadProfile(user) {
   if (user.role === 'coach') {
     const { rows } = await pool.query(
       `SELECT c.id, c.team_name, c.team_level, c.coaching_role, c.experience,
-              s.id AS school_id, s.name AS school_name
+              s.id AS school_id, s.name AS school_name,
+              t.id AS team_id, t.name AS team_name_actual, t.level AS team_level_actual,
+              ts.id AS team_sport_id, ts.name AS team_sport_name,
+              tsc.id AS team_school_id, tsc.name AS team_school_name
          FROM coaches c
          LEFT JOIN schools s ON s.id = c.school_id
+         LEFT JOIN teams t ON t.coach_id = c.user_id
+         LEFT JOIN sports ts ON ts.id = t.sport_id
+         LEFT JOIN schools tsc ON tsc.id = t.school_id
         WHERE c.user_id = $1`,
       [user.id]
     );
     const c = rows[0];
     if (!c) return null;
-    const sports = await pool.query(
-      `SELECT sp.id, sp.name FROM coach_sports cs
-         JOIN sports sp ON sp.id = cs.sport_id
-        WHERE cs.coach_id = $1 ORDER BY sp.name`,
-      [c.id]
-    );
+    const team = c.team_id ? {
+      id: c.team_id,
+      name: c.team_name_actual,
+      level: c.team_level_actual,
+      sport: c.team_sport_id ? { id: c.team_sport_id, name: c.team_sport_name } : null,
+      school: c.team_school_id ? { id: c.team_school_id, name: c.team_school_name } : null,
+    } : null;
     return {
       school: c.school_id ? { id: c.school_id, name: c.school_name } : null,
-      teamName: c.team_name,
-      teamLevel: c.team_level,
+      teamName: team ? team.name : c.team_name,
+      teamLevel: team ? team.level : c.team_level,
       coachingRole: c.coaching_role,
       experience: c.experience,
-      sports: sports.rows,
+      team,
+      sports: team && team.sport ? [team.sport] : [],
     };
   }
 
@@ -173,11 +255,20 @@ async function loadProfile(user) {
 }
 
 async function withProfile(user) {
-  return { ...user, profile: await loadProfile(user) };
+  const profile = await loadProfile(user);
+  return {
+    ...user,
+    firstName: user.first_name,
+    lastName: user.last_name,
+    dateOfBirth: user.date_of_birth,
+    createdAt: user.created_at,
+    profile,
+    ...(user.role === 'coach' ? { team: profile ? profile.team : null } : {}),
+  };
 }
 
 async function register(req, res, next) {
-  if (req.body.role === 'player') return registerPlayer(req, res, next);
+  if (['player', 'learner'].includes(req.body.role)) return registerPlayer(req, res, next);
 
   try {
     // Sport must be one of the seeded sports (see GET /api/sports).
@@ -273,7 +364,9 @@ async function login(req, res, next) {
     const { email, password } = req.body;
 
     const { rows } = await pool.query(
-      `SELECT ${USER_COLUMNS}, password, email_verified FROM users WHERE email = $1`,
+      `SELECT ${USER_SELECT}, u.password, u.email_verified
+         ${USER_FROM}
+        WHERE u.email = $1`,
       [email]
     );
     const found = rows[0];
@@ -286,7 +379,8 @@ async function login(req, res, next) {
       return res.status(403).json(errorBody('EMAIL_NOT_VERIFIED', 'Verify your email before logging in'));
     }
 
-    const { password: _omit, email_verified: _verified, ...user } = found;
+    const { password: _omit, email_verified: _verified, ...userRow } = found;
+    const user = await withProfile(userRow);
     const tokens = await issueTokens(user);
     res.json({ user, ...tokens });
   } catch (err) {
@@ -299,12 +393,16 @@ async function verifyOtp(req, res, next) {
   let transactionStarted = false;
   try {
     client = await pool.connect();
-    const { email, otp } = req.body;
+    const { email, code, otp } = req.body;
     await client.query('BEGIN');
     transactionStarted = true;
 
     const { rows: userRows } = await client.query(
-      'SELECT id, email_verified FROM users WHERE email = $1 FOR UPDATE',
+      `SELECT u.id, u.email_verified, r.name AS role
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+        WHERE u.email = $1
+        FOR UPDATE OF u`,
       [email]
     );
     const user = userRows[0];
@@ -332,7 +430,7 @@ async function verifyOtp(req, res, next) {
       return res.status(429).json(errorBody('TOO_MANY_REQUESTS', 'Too many incorrect codes; request a new code'));
     }
 
-    const submittedHash = hashOtp(otp);
+    const submittedHash = hashOtp(code || otp);
     const matches = crypto.timingSafeEqual(
       Buffer.from(savedCode.code_hash, 'hex'),
       Buffer.from(submittedHash, 'hex')
@@ -355,7 +453,20 @@ async function verifyOtp(req, res, next) {
     await client.query('DELETE FROM email_verification_codes WHERE user_id = $1', [user.id]);
     await client.query('COMMIT');
     transactionStarted = false;
-    res.json({ message: 'Account verified. You can now log in.' });
+
+    if (user.role === 'coach') {
+      client.release();
+      client = null;
+      const { rows: verifiedUserRows } = await pool.query(
+        `SELECT ${USER_SELECT} ${USER_FROM} WHERE u.id = $1`,
+        [user.id]
+      );
+      const verifiedUser = await withProfile(verifiedUserRows[0]);
+      const tokens = await issueTokens(verifiedUser);
+      return res.json({ ...tokens, user: verifiedUser });
+    }
+
+    return res.json({ message: 'Account verified. You can now log in.' });
   } catch (err) {
     if (transactionStarted) {
       try {
@@ -380,14 +491,14 @@ async function resendOtp(req, res, next) {
     transactionStarted = true;
 
     const { rows: userRows } = await client.query(
-      'SELECT id, email_verified FROM users WHERE email = $1 FOR UPDATE',
+      'SELECT id, first_name, email_verified FROM users WHERE email = $1 FOR UPDATE',
       [email]
     );
     const user = userRows[0];
     if (!user || user.email_verified) {
       await client.query('COMMIT');
       transactionStarted = false;
-      return res.json({ message: 'If the account is awaiting verification, a new code has been sent' });
+      return res.json({ retryAfterSeconds: 0 });
     }
 
     const { rows: codeRows } = await client.query(
@@ -406,10 +517,10 @@ async function resendOtp(req, res, next) {
 
     const otp = generateOtp();
     await saveOtp(client, user.id, otp);
-    await sendVerificationCode(email, otp);
+    await sendVerificationCode(email, otp, { firstName: user.first_name, expiresInMinutes: OTP_TTL_MINUTES });
     await client.query('COMMIT');
     transactionStarted = false;
-    res.json({ message: 'If the account is awaiting verification, a new code has been sent' });
+    res.json({ retryAfterSeconds: OTP_RESEND_SECONDS });
   } catch (err) {
     if (transactionStarted) {
       try {
@@ -484,4 +595,4 @@ async function me(req, res, next) {
   }
 }
 
-module.exports = { register, login, verifyOtp, resendOtp, refresh, logout, me };
+module.exports = { register, registerCoach, login, verifyOtp, resendOtp, refresh, logout, me };
