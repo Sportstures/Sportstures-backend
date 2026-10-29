@@ -20,6 +20,7 @@ Every error has the same shape:
 | Status | Code | Meaning |
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Bad input, see `details` |
+| 400 | `INVALID_OTP` | Verification code is invalid or expired |
 | 401 | `NO_TOKEN` | No Bearer token sent |
 | 401 | `INVALID_TOKEN` | Access token invalid |
 | 401 | `TOKEN_EXPIRED` | Access token expired: call `/refresh` and retry |
@@ -27,8 +28,9 @@ Every error has the same shape:
 | 401 | `INVALID_REFRESH_TOKEN` | Refresh token unknown or already used: log in again |
 | 401 | `REFRESH_TOKEN_EXPIRED` | Refresh token expired: log in again |
 | 403 | `FORBIDDEN` | Logged in but role not allowed |
+| 403 | `EMAIL_NOT_VERIFIED` | Verify your email before logging in |
 | 409 | `EMAIL_TAKEN` | Email already registered |
-| 429 | `TOO_MANY_REQUESTS` | Rate limited (20 register/login attempts per 15 min per IP) |
+| 429 | `TOO_MANY_REQUESTS` | Rate limited; resend also returns a `Retry-After` header |
 
 ## Auth
 
@@ -41,25 +43,64 @@ fails, send the user to the login screen.
 
 ### POST /api/auth/register
 
-Body:
+Player registration creates an unverified player and emails a six-digit OTP.
+Configure `SMTP_HOST` and `SMTP_FROM` (and, when required, `SMTP_USER` and
+`SMTP_PASSWORD`) before accepting player registrations. The sport step may be
+skipped by sending `sport: null` or omitting the property.
 
 ```json
-{ "email": "ada@example.com", "password": "Passw0rdOK", "firstName": "Ada", "lastName": "Obi", "phone": "08012345678" }
+{
+  "role": "player",
+  "firstName": "Ada",
+  "lastName": "Obi",
+  "dateOfBirth": "2009-03-14",
+  "gender": "female",
+  "school": { "name": "Example School", "grade": 10, "className": "10A" },
+  "sport": { "name": "Football", "teamName": "Falcons", "jerseyNumber": 7, "level": "U16" },
+  "email": "ada@example.com",
+  "password": "Passw0rdOK"
+}
 ```
 
-`email` and `password` are required. Password: 8 to 72 characters with at least one letter and one number.
-New accounts always get role `user`.
+Player registration requires all personal and school fields. Gender is `male`
+or `female`; grade is 1–12; date of birth must be within the last 99 years and
+not in the future. Sport is optional; when present, its name can be any
+non-empty text up to 100 characters. Passwords must be 8 to 72 characters with
+at least one letter and one number. Other registration calls that omit `role`
+retain the existing generic `user` flow.
 
-Response `201`:
+Player response `201`:
 
 ```json
-{ "user": { "id": 1, "email": "ada@example.com", "first_name": "Ada", "last_name": "Obi", "phone": "08012345678", "role": "user", "created_at": "..." },
-  "accessToken": "...", "refreshToken": "..." }
+{ "userId": 1 }
 ```
+
+No access or refresh token is issued until the email is verified.
+
+### POST /api/auth/verify-otp
+
+Body: `{ "email": "ada@example.com", "otp": "123456" }`.
+The OTP must be six numeric digits. Response `200`:
+`{ "message": "Account verified. You can now log in." }`.
+Verification does not automatically sign the user in.
+
+### POST /api/auth/resend-otp
+
+Body: `{ "email": "ada@example.com" }`. Response `200` uses a generic message
+whether or not the address has a pending account. Resends are limited to one
+per email every 60 seconds; a limited response is `429` with a `Retry-After`
+header. Verification codes allow at most five incorrect attempts.
+
+### Generic registration response
+
+Requests without `role: "player"` preserve the legacy generic `user`
+registration response and token issuance. Password rules are the same.
 
 ### POST /api/auth/login
 
 Body: `{ "email": "...", "password": "..." }`. Response `200`: same shape as register.
+Unverified player accounts receive `403 EMAIL_NOT_VERIFIED` and must complete
+email verification first.
 
 ### POST /api/auth/refresh
 

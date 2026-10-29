@@ -55,6 +55,13 @@ Since you have pgAdmin4 installed locally:
    -- Copy and paste contents of db/schema.sql here
    ```
    - Execute the query to create all tables and indexes
+   - For an existing database, also run `db/migrations/001_auth_foundation.sql`
+     followed by `db/migrations/002_player_signup_verification.sql` and
+     `db/migrations/003_free_text_player_sport.sql`
+
+Player email verification requires an SMTP server. Set `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_FROM`, and the SMTP credentials (when required) in `.env` using the
+placeholders in `.env.example`.
 
 ### 4. Start the Backend Server
 ```bash
