@@ -20,6 +20,7 @@ Every error has the same shape:
 | Status | Code | Meaning |
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Bad input, see `details` |
+| 400 | `INVALID_OTP` | Verification code is invalid or expired |
 | 401 | `NO_TOKEN` | No Bearer token sent |
 | 401 | `INVALID_TOKEN` | Access token invalid |
 | 401 | `TOKEN_EXPIRED` | Access token expired: call `/refresh` and retry |
@@ -27,12 +28,36 @@ Every error has the same shape:
 | 401 | `INVALID_REFRESH_TOKEN` | Refresh token unknown or already used: log in again |
 | 401 | `REFRESH_TOKEN_EXPIRED` | Refresh token expired: log in again |
 | 403 | `FORBIDDEN` | Logged in but role not allowed |
-| 400 | `UNKNOWN_SPORT` | `sport.name` is not in `GET /api/sports` |
-| 400 | `SAME_TEAM` / `SPORT_MISMATCH` / `UNKNOWN_COMPETITION` | Fixture rules, see Fixtures |
-| 404 | `NOT_FOUND` | No team or fixture with that id |
+| 403 | `EMAIL_NOT_VERIFIED` | Verify your email before logging in |
 | 409 | `EMAIL_TAKEN` | Email already registered |
-| 409 | `COMPETITION_EXISTS` / `FIXTURE_LOCKED` | Duplicate competition name, or editing a live/finished fixture |
-| 429 | `TOO_MANY_REQUESTS` | Rate limited (20 register/login attempts per 15 min per IP, configurable with `AUTH_RATE_LIMIT_MAX`) |
+| 409 | `COACH_TEAM_EXISTS` | A coach already has a team |
+| 409 | `COACH_PROFILE_MISSING` | Coach account has no coach profile |
+| 422 | — | Invalid coach signup input; `errors` maps fields to messages |
+| 429 | `TOO_MANY_REQUESTS` | Rate limited; resend also returns a `Retry-After` header |
+
+## Contact
+
+### GET /api/contact
+
+Public. Use these addresses on contact pages, footers and help screens instead of hard-coding them.
+
+Response `200`:
+
+```json
+{
+  "contacts": {
+    "support": { "email": "support@sportstures.co.za", "use": "Help with your account or the app" },
+    "info": { "email": "info@sportstures.co.za", "use": "General enquiries" },
+    "hello": { "email": "hello@sportstures.co.za", "use": "Say hello or get in touch" },
+    "partnerships": { "email": "partnerships@sportstures.co.za", "use": "Schools and businesses" },
+    "privacy": { "email": "privacy@sportstures.co.za", "use": "Privacy and personal information requests" },
+    "security": { "email": "security@sportstures.co.za", "use": "Report a security issue" },
+    "billing": { "email": "billing@sportstures.co.za", "use": "Billing questions" }
+  }
+}
+```
+
+`GET /.well-known/security.txt` publishes the security address in the standard format.
 
 ## Auth
 
@@ -51,97 +76,124 @@ Only `learner` and `coach` can be chosen at registration. Admins are set manuall
 
 ### POST /api/auth/register
 
-One request carries all four signup steps, so the app collects the steps locally and sends once at the end.
+Learner registration creates an unverified learner and emails a six-digit OTP.
+Configure `SMTP_HOST` and `SMTP_FROM` (and, when required, `SMTP_USER` and
+`SMTP_PASSWORD`) before accepting learner registrations. The sport step may be
+skipped by sending `sport: null` or omitting the property.
 
 ```json
 {
-  "email": "ada@example.com",
-  "password": "Passw0rdOK",
+  "role": "learner",
   "firstName": "Ada",
   "lastName": "Obi",
-  "dateOfBirth": "2009-05-14",
+  "dateOfBirth": "2009-03-14",
   "gender": "female",
-  "role": "learner",
-  "school": { "name": "Jeppe High School", "grade": 9, "className": "9B" },
-  "sport": { "name": "Netball", "teamName": "Jeppe U15", "jerseyNumber": 7, "level": "U15" }
+  "school": { "name": "Example School", "grade": 10, "className": "10A" },
+  "sport": { "name": "Football", "teamName": "Falcons", "jerseyNumber": 7, "level": "U16" },
+  "email": "ada@example.com",
+  "password": "Passw0rdOK"
 }
 ```
 
-| Field | Required | Notes |
-|---|---|---|
-| `email`, `password` | yes | Password: 8 to 72 characters with a letter and a number |
-| `firstName`, `lastName`, `phone` | no | |
-| `dateOfBirth` | no | `YYYY-MM-DD` (convert the day/month/year dropdowns), not in the future |
-| `gender` | no | `male` or `female` (case-insensitive) |
-| `role` | no | `learner` (default) or `coach`. `admin` is rejected |
-| `school` | no | `name` (text, created if new, matched ignoring case), `grade` (number 1 to 12, send `9` not `"Grade 9"`), `className` |
-| `sport` | no | Skip the whole object if the user skips step 3. `name` must be one from `GET /api/sports`. `jerseyNumber` 0 to 999 |
-| `coach` | no | Only used when `role` is `coach`. See "Coach signup" below |
+Learner registration also accepts the legacy `role: "player"` value, but
+stores the account with role `learner`. It requires all personal and school
+fields. Gender is `male` or `female`; grade is 1–12; date of birth must be
+within the last 99 years and not in the future. Sport is optional; when
+present, its name can be any non-empty text up to 100 characters. Passwords
+must be 8 to 72 characters with at least one letter and one number. Learner
+and coach school records use the same case-insensitive `schools` table.
 
-The whole signup is saved together or not at all.
+Learner response `201`:
 
-Response `201`:
+```json
+{ "userId": 1 }
+```
+
+No access or refresh token is issued until the email is verified. Learner
+accounts can log in after verification.
+
+### POST /api/auth/register/coach
+
+Creates a coach, their single team, and any new school or sport in one
+transaction. The email must be verified before login is allowed. School and
+sport names are trimmed and matched case-insensitively; `Soccer` resolves to
+the canonical `Football` sport.
 
 ```json
 {
-  "user": {
-    "id": 1, "email": "ada@example.com", "first_name": "Ada", "last_name": "Obi", "phone": null,
-    "date_of_birth": "2009-05-14", "gender": "female", "role": "learner", "created_at": "...",
-    "profile": {
-      "school": { "id": 1, "name": "Jeppe High School" }, "grade": 9, "className": "9B",
-      "sport": { "id": 6, "name": "Netball" }, "teamName": "Jeppe U15", "jerseyNumber": 7, "level": "U15"
-    }
+  "firstName": "Thabo",
+  "lastName": "Williams",
+  "dateOfBirth": "1988-04-12",
+  "gender": "male",
+  "school": "Greenwood High",
+  "coachingRole": "head_coach",
+  "experience": "5_10_years",
+  "team": {
+    "name": "Basketball Boys",
+    "level": "1st_team",
+    "sport": "Basketball"
   },
-  "accessToken": "...", "refreshToken": "..."
+  "email": "coach@school.com",
+  "password": "Passw0rdOK"
 }
 ```
 
-`profile` is `null` when no school or sport was given. For coaches it holds the coach details (below).
-The mobile "confirm password" field is checked in the app only and is not sent.
+Allowed `coachingRole` values are `head_coach`, `assistant_coach`,
+`fitness_coach`, and `team_manager`. Allowed `experience` values are
+`less_than_1_year`, `1_3_years`, `3_5_years`, `5_10_years`, and
+`10_plus_years`. Allowed team levels are `u13`, `u14`, `u15`, `u16`, `u17`,
+`u19`, `1st_team`, and `2nd_team`. The sport is free text up to 40 characters.
+Password length is 8–72 characters.
 
-#### Coach signup
+Response `201`: `{ "userId": 42, "status": "pending_verification" }`.
+The backend sends a six-digit code by email. Duplicate email returns `409
+EMAIL_TAKEN`; invalid fields return `422`, for example:
+`{ "errors": { "team.sport": "Required" } }`.
 
-Send `"role": "coach"` plus the personal fields above, and a `coach` object from the coach steps
-(Coaching, Sports). Every field is optional at the API; the app enforces what is required.
+### POST /api/auth/verify-otp
+
+Body: `{ "email": "coach@school.com", "code": "123456" }`. The code must be
+six numeric digits, expires after 10 minutes, and allows at most five incorrect
+attempts. `otp` is accepted as a legacy alias for `code`.
+
+Coach response `200` automatically signs in the verified coach:
 
 ```json
 {
-  "email": "coach@example.com", "password": "Passw0rdOK", "role": "coach",
-  "firstName": "Sipho", "lastName": "Williams", "dateOfBirth": "1985-03-02", "gender": "male",
-  "coach": {
-    "school": "Jeppe High School",
-    "teamName": "Basketball Boys",
-    "teamLevel": "1st Team",
-    "coachingRole": "Head Coach",
-    "experience": "5 - 10 years",
-    "sports": ["Basketball", "Swimming"]
+  "accessToken": "...",
+  "refreshToken": "...",
+  "user": {
+    "id": 42,
+    "role": "coach",
+    "firstName": "Thabo",
+    "team": {
+      "id": 10,
+      "name": "Basketball Boys",
+      "level": "1st_team",
+      "sport": { "id": 2, "name": "Basketball" },
+      "school": { "id": 1, "name": "Greenwood High" }
+    }
   }
 }
 ```
 
-- `school` is a plain string (matched ignoring case, created if new).
-- `teamLevel`, `coachingRole` and `experience` are stored exactly as sent (the dropdown text), so a new dropdown option needs no backend change.
-- `sports` is a list of names from `GET /api/sports`; duplicates are ignored and an unknown name returns `UNKNOWN_SPORT`.
+For legacy registrations, response remains
+`{ "message": "Account verified. You can now log in." }`.
 
-The coach `profile` in the response:
+### POST /api/auth/resend-otp
 
-```json
-{ "school": { "id": 1, "name": "Jeppe High School" }, "teamName": "Basketball Boys", "teamLevel": "1st Team",
-  "coachingRole": "Head Coach", "experience": "5 - 10 years",
-  "sports": [{ "id": 2, "name": "Basketball" }, { "id": 10, "name": "Swimming" }] }
-```
-
-### GET /api/sports
-
-Public. Response `200`: `{ "sports": [{ "id": 1, "name": "Athletics" }, ...] }`. It currently has 10 sports:
-Athletics, Basketball, Cricket, Football, Hockey, Netball, Rugby, Swimming, Tennis, Volleyball.
-Use this to fill the sport dropdowns (learner and coach) so the app and website never drift from the backend list.
-The learner signup list in the app has no Swimming and the coach list has no Tennis or Volleyball, so both
-should load from this endpoint.
+Body: `{ "email": "coach@school.com" }`. Successful response `200`:
+`{ "retryAfterSeconds": 60 }`. An email with no pending verification returns
+`{ "retryAfterSeconds": 0 }`. Resends are limited to one per email every 60
+seconds; a request during the cooldown returns `429` with a `Retry-After`
+header.
 
 ### POST /api/auth/login
 
-Body: `{ "email": "...", "password": "..." }`. Response `200`: same shape as register.
+Body: `{ "email": "...", "password": "..." }`. Response `200`: user plus access
+and refresh tokens. Coach users include `user.role` and `user.team` (also
+available under `user.profile.team`). Unverified accounts receive
+`403 EMAIL_NOT_VERIFIED` and must complete email verification first.
 
 ### POST /api/auth/refresh
 
@@ -160,6 +212,7 @@ Response `200`: `{ "user": { ... } }` (same user object as register, including `
 All of these need `Authorization: Bearer <accessToken>`. A **team** is one sport at one school, with a level
 (`Varsity`, `U16`, `1st Team`) and a category (`boys`, `girls`, `mixed`). Build the label the screens show,
 e.g. "Boys U19 Soccer", from `genderCategory` + `level` + `sport.name`.
+Each coach owns at most one team, and `teams.coach_id` stores the coach's user ID.
 
 Lists accept `limit` (default 50, max 100) and `offset`.
 

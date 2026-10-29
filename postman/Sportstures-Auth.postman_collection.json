@@ -1,0 +1,1132 @@
+{
+  "info": {
+    "_postman_id": "f7a40f6a-a2a8-4c08-a0b2-715f5bd56c19",
+    "name": "Sportstures - Auth",
+    "description": "Tests learner and coach signup, email OTP verification, login, token refresh and logout.\n\nSetup:\n1. Start the backend with SMTP configured (see README).\n2. Set the testInbox collection variable to an inbox you can read, for example you@gmail.com. Each register request creates a fresh address like you+coach1730000000000@gmail.com, so you can rerun without changing anything. If your inbox does not support +addresses, clear testInbox and set learnerEmail / coachEmail directly.\n3. Run \"1. Register\" in a folder, copy the emailed code into learnerOtp or coachOtp, then run the rest of that folder in order.\n\nThe auth endpoints allow AUTH_RATE_LIMIT_MAX attempts per IP per 15 minutes, and OTP endpoints allow 10.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "id": "20f256b9-dcc9-4701-9a41-96bd3641f71d",
+      "name": "Learner signup",
+      "description": "Register, verify by email, then log in. Run in order. The sport step is optional; see Optional checks for a learner who skips it.",
+      "item": [
+        {
+          "id": "2fa0e021-0a75-4dcf-a103-44d0ca239d7c",
+          "name": "1. Register learner",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "33ca80f4-e16f-4730-ab72-f18dd16d2e63",
+                "type": "text/javascript",
+                "exec": [
+                  "const inbox = pm.collectionVariables.get('testInbox');",
+                  "if (inbox && inbox.includes('@') && !inbox.startsWith('replace-')) {",
+                  "  const [local, domain] = inbox.split('@');",
+                  "  pm.collectionVariables.set('learnerEmail', local + '+learner' + Date.now() + '@' + domain);",
+                  "} else if (!pm.collectionVariables.get('learnerEmail')) {",
+                  "  throw new Error('Set the testInbox collection variable to an inbox you can read, for example you@gmail.com');",
+                  "}",
+                  "console.log('Registering learner:', pm.collectionVariables.get('learnerEmail'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "c25bf193-efc3-45b3-8f17-6b755bb31a5b",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Learner registration returns 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Response includes a numeric userId and no tokens', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.userId).to.be.a('number');",
+                  "  pm.expect(body).not.to.have.property('accessToken');",
+                  "  pm.collectionVariables.set('learnerUserId', String(body.userId));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Creates an unverified learner (Lerato Dlamini, Grade 10 at Greenwood High, Netball) with the optional sport step filled in, and emails a six-digit code to learnerEmail. A new email is generated from testInbox on every send.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"learner\",\n  \"firstName\": \"Lerato\",\n  \"lastName\": \"Dlamini\",\n  \"dateOfBirth\": \"2009-03-14\",\n  \"gender\": \"female\",\n  \"school\": {\n    \"name\": \"Greenwood High\",\n    \"grade\": 10,\n    \"className\": \"10A\"\n  },\n  \"sport\": {\n    \"name\": \"Netball\",\n    \"teamName\": \"Greenwood Girls U16\",\n    \"jerseyNumber\": 7,\n    \"level\": \"U16\"\n  },\n  \"email\": \"{{learnerEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "950e78ef-75c9-411c-a3c7-8fbed05bda86",
+          "name": "2. Login before verification (expect 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "c5b3e3c4-69c2-4b98-9011-9dce63df5517",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Unverified login is rejected with 403 EMAIL_NOT_VERIFIED', () => {",
+                  "  pm.response.to.have.status(403);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('EMAIL_NOT_VERIFIED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Unverified accounts cannot log in.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{learnerEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "08c0a93b-a66e-48f3-89ad-ffc4c4d6d42c",
+          "name": "3. Verify learner OTP",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "cc304c9e-84a3-4ef4-a71f-e0c5a7fc4bce",
+                "type": "text/javascript",
+                "exec": [
+                  "const code = pm.collectionVariables.get('learnerOtp');",
+                  "if (!/^\\d{6}$/.test(code || '') || code === '000000') {",
+                  "  throw new Error('Copy the six-digit code from the learner verification email into the learnerOtp collection variable, then send this again');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "6da3b090-1bc6-4657-b725-0bc8ccfd6cd4",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OTP verification returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Learner is told to log in', () => {",
+                  "  pm.expect(pm.response.json().message).to.eql('Account verified. You can now log in.');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "verify-otp"
+              ]
+            },
+            "description": "Set learnerOtp to the code from the email first. Codes expire after 10 minutes and allow five wrong attempts. Learners are not signed in here; they log in next.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{learnerEmail}}\",\n  \"code\": \"{{learnerOtp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "8df1f438-3526-4542-9bd2-b8046744b418",
+          "name": "4. Login learner",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "fd9ffc92-2c82-4a06-bc86-8656a11f86a1",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Verified login returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Login returns the learner and tokens', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.user.role).to.eql('learner');",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
+                  "  pm.collectionVariables.set('learnerAccessToken', body.accessToken);",
+                  "  pm.collectionVariables.set('learnerRefreshToken', body.refreshToken);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Signs in the verified learner and saves learnerAccessToken and learnerRefreshToken.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{learnerEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "1804db3e-9d17-4dfe-b96a-51824269c022",
+          "name": "5. Get current learner",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "b12bf388-fea8-41c5-961a-670c25dd6235",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Authenticated user is the registered learner', () => {",
+                  "  const { user } = pm.response.json();",
+                  "  pm.expect(user.role).to.eql('learner');",
+                  "  pm.expect(user.email.toLowerCase()).to.eql(pm.collectionVariables.get('learnerEmail').toLowerCase());",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Checks the learner access token.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{learnerAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "c6d1c1e0-f27c-4c95-965f-c2bc83e348ba",
+          "name": "6. Refresh learner tokens",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "342bf722-fb4c-440d-8649-2fe7963208b5",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Refresh returns 200 with a new pair', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.refreshToken).to.not.eql(pm.collectionVariables.get('learnerRefreshToken'));",
+                  "  pm.collectionVariables.set('learnerAccessToken', body.accessToken);",
+                  "  pm.collectionVariables.set('learnerRefreshToken', body.refreshToken);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Refresh tokens are single use, so this saves the new pair.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{learnerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "fdc372ab-4677-4ac2-b7ce-926698c8e879",
+          "name": "7. Logout learner",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "3675e0ba-1072-41fe-b58c-90a4db6c078d",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Logout returns 200', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().message).to.eql('Logged out');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Revokes the refresh token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{learnerRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "id": "6a8521c1-e2e0-43c7-944d-e366b80cbc0e",
+      "name": "Coach signup",
+      "description": "Register a coach with their team, verify by email (which signs them in), then check /me and login. Run in order.",
+      "item": [
+        {
+          "id": "ae2895f7-ad23-4b33-93bf-1bb84ca365d9",
+          "name": "1. Register coach",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "2f16836d-8d18-4fea-805b-bd3ee64c9d3a",
+                "type": "text/javascript",
+                "exec": [
+                  "const inbox = pm.collectionVariables.get('testInbox');",
+                  "if (inbox && inbox.includes('@') && !inbox.startsWith('replace-')) {",
+                  "  const [local, domain] = inbox.split('@');",
+                  "  pm.collectionVariables.set('coachEmail', local + '+coach' + Date.now() + '@' + domain);",
+                  "} else if (!pm.collectionVariables.get('coachEmail')) {",
+                  "  throw new Error('Set the testInbox collection variable to an inbox you can read, for example you@gmail.com');",
+                  "}",
+                  "console.log('Registering coach:', pm.collectionVariables.get('coachEmail'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "5260a82d-73fd-4e55-af16-ca87449ffa56",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Coach registration returns 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Coach is pending verification', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.userId).to.be.a('number');",
+                  "  pm.expect(body.status).to.eql('pending_verification');",
+                  "  pm.expect(body).not.to.have.property('accessToken');",
+                  "  pm.collectionVariables.set('coachUserId', String(body.userId));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register/coach",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register",
+                "coach"
+              ]
+            },
+            "description": "Creates an unverified coach (Thabo Williams, head coach at Greenwood High) and their team, Basketball Boys 1st team, then emails a six-digit code to coachEmail. A new email is generated from testInbox on every send.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Thabo\",\n  \"lastName\": \"Williams\",\n  \"dateOfBirth\": \"1988-04-12\",\n  \"gender\": \"male\",\n  \"school\": \"Greenwood High\",\n  \"coachingRole\": \"head_coach\",\n  \"experience\": \"5_10_years\",\n  \"team\": {\n    \"name\": \"Basketball Boys\",\n    \"level\": \"1st_team\",\n    \"sport\": \"Basketball\"\n  },\n  \"email\": \"{{coachEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "5f6f8fd3-4011-4ed3-a348-b6d4026e66ed",
+          "name": "2. Login before verification (expect 403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "7ae94e4b-c40e-430d-b5d4-9de74b66caf9",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Unverified login is rejected with 403 EMAIL_NOT_VERIFIED', () => {",
+                  "  pm.response.to.have.status(403);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('EMAIL_NOT_VERIFIED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Unverified coaches cannot log in.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{coachEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "7a47212b-1b69-47e5-b52d-3bdf1683739b",
+          "name": "3. Verify coach OTP (signs in)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "6bf040a1-6a0d-4c21-b407-94d6842413a0",
+                "type": "text/javascript",
+                "exec": [
+                  "const code = pm.collectionVariables.get('coachOtp');",
+                  "if (!/^\\d{6}$/.test(code || '') || code === '000000') {",
+                  "  throw new Error('Copy the six-digit code from the coach verification email into the coachOtp collection variable, then send this again');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "048f0bc0-e04f-40a5-bb7d-0531382a78ad",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OTP verification returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Coach is signed in with their team', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.user.role).to.eql('coach');",
+                  "  pm.expect(body.user.team.name).to.eql('Basketball Boys');",
+                  "  pm.expect(body.user.team.level).to.eql('1st_team');",
+                  "  pm.expect(body.user.team.sport.name).to.eql('Basketball');",
+                  "  pm.expect(body.user.team.school.name).to.eql('Greenwood High');",
+                  "  pm.collectionVariables.set('coachAccessToken', body.accessToken);",
+                  "  pm.collectionVariables.set('coachRefreshToken', body.refreshToken);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "verify-otp"
+              ]
+            },
+            "description": "Set coachOtp to the code from the email first. Verifying a coach signs them in straight away and returns their team.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{coachEmail}}\",\n  \"code\": \"{{coachOtp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "8a407563-46ca-4f9a-bc03-8c927a962130",
+          "name": "4. Get current coach",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "e68caa24-f08d-41bd-be80-36a18dfa54ee",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Authenticated user is the registered coach', () => {",
+                  "  const { user } = pm.response.json();",
+                  "  pm.expect(user.role).to.eql('coach');",
+                  "  pm.expect(user.email.toLowerCase()).to.eql(pm.collectionVariables.get('coachEmail').toLowerCase());",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Checks the coach access token.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{coachAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "bc58d7b8-37de-48e8-b5ae-91b5478f60b9",
+          "name": "5. Login coach",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "8d2c1c1c-9843-4413-8532-dbc5a1521904",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Login returns the coach, team and tokens', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.user.role).to.eql('coach');",
+                  "  pm.expect(body.user.team.name).to.eql('Basketball Boys');",
+                  "  pm.collectionVariables.set('coachAccessToken', body.accessToken);",
+                  "  pm.collectionVariables.set('coachRefreshToken', body.refreshToken);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "A normal login for the verified coach also returns their team.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{coachEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "id": "b633c664-7c8b-401f-8517-e689c6827d59",
+      "name": "Optional checks",
+      "description": "Error cases and the resend cooldown. Each says when to run it.",
+      "item": [
+        {
+          "id": "c8e7a8a6-342b-4749-bb4a-9315b6bbecf7",
+          "name": "Register learner who skipped sport (sport: null)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "464cccff-2141-4b38-8103-8488d98065f1",
+                "type": "text/javascript",
+                "exec": [
+                  "const inbox = pm.collectionVariables.get('testInbox');",
+                  "if (inbox && inbox.includes('@') && !inbox.startsWith('replace-')) {",
+                  "  const [local, domain] = inbox.split('@');",
+                  "  pm.collectionVariables.set('learnerNoSportEmail', local + '+learnerNoSport' + Date.now() + '@' + domain);",
+                  "} else if (!pm.collectionVariables.get('learnerNoSportEmail')) {",
+                  "  throw new Error('Set the testInbox collection variable to an inbox you can read, for example you@gmail.com');",
+                  "}",
+                  "console.log('Registering learnerNoSport:', pm.collectionVariables.get('learnerNoSportEmail'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "9930e53f-252c-45e2-98f5-4bbadd347452",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Learner without a sport registers with 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Response includes a numeric userId and no tokens', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.userId).to.be.a('number');",
+                  "  pm.expect(body).not.to.have.property('accessToken');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "The sport step is optional. Sends sport: null, as the app does when the learner skips it. Sends a real verification email to a fresh address from testInbox.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"learner\",\n  \"firstName\": \"Sipho\",\n  \"lastName\": \"Nkosi\",\n  \"dateOfBirth\": \"2010-07-21\",\n  \"gender\": \"male\",\n  \"school\": {\n    \"name\": \"Greenwood High\",\n    \"grade\": 9,\n    \"className\": \"9B\"\n  },\n  \"sport\": null,\n  \"email\": \"{{learnerNoSportEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "bf7ba3ac-d231-4305-b400-3cdd473edf63",
+          "name": "Register learner who skipped sport (sport omitted)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "id": "f7172f59-3a7c-406c-a7d7-d9fa0c9702c8",
+                "type": "text/javascript",
+                "exec": [
+                  "const inbox = pm.collectionVariables.get('testInbox');",
+                  "if (inbox && inbox.includes('@') && !inbox.startsWith('replace-')) {",
+                  "  const [local, domain] = inbox.split('@');",
+                  "  pm.collectionVariables.set('learnerNoSportEmail', local + '+learnerNoSport' + Date.now() + '@' + domain);",
+                  "} else if (!pm.collectionVariables.get('learnerNoSportEmail')) {",
+                  "  throw new Error('Set the testInbox collection variable to an inbox you can read, for example you@gmail.com');",
+                  "}",
+                  "console.log('Registering learnerNoSport:', pm.collectionVariables.get('learnerNoSportEmail'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "id": "4e8268cc-a437-4677-97d4-81392d81468c",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Learner without a sport registers with 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Response includes a numeric userId and no tokens', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.userId).to.be.a('number');",
+                  "  pm.expect(body).not.to.have.property('accessToken');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "The sport step is optional. Leaves sport out of the body entirely. Sends a real verification email to a fresh address from testInbox.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"learner\",\n  \"firstName\": \"Sipho\",\n  \"lastName\": \"Nkosi\",\n  \"dateOfBirth\": \"2010-07-21\",\n  \"gender\": \"male\",\n  \"school\": {\n    \"name\": \"Greenwood High\",\n    \"grade\": 9,\n    \"className\": \"9B\"\n  },\n  \"email\": \"{{learnerNoSportEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "6fa77a3f-da48-4053-8e86-09a543dfb93f",
+          "name": "Resend learner OTP (run after 60s cooldown)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "2db1e252-235d-4e65-a096-922d01024d73",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Resend succeeds or reports the cooldown', () => pm.expect([200, 429]).to.include(pm.response.code));",
+                  "pm.test('Response matches the status', () => {",
+                  "  if (pm.response.code === 200) pm.expect(pm.response.json().retryAfterSeconds).to.be.a('number');",
+                  "  else pm.expect(pm.response.headers.get('Retry-After')).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/resend-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "resend-otp"
+              ]
+            },
+            "description": "Run after registering and before verifying. One resend per email every 60 seconds; a 429 with Retry-After is expected during the cooldown. A new code replaces the old one. Change the body to {{coachEmail}} to test a coach.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{learnerEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "6c38498d-2185-40a9-8c59-f8bd24b7437c",
+          "name": "Reject invalid learner signup (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "0694bf49-30dc-48d3-bff9-2204f1e22ee0",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns 400 VALIDATION_ERROR with details', () => {",
+                  "  pm.response.to.have.status(400);",
+                  "  const { error } = pm.response.json();",
+                  "  pm.expect(error.code).to.eql('VALIDATION_ERROR');",
+                  "  pm.expect(error.details.map((d) => d.field)).to.include('school');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Missing school details. Validation fails before anything is saved or emailed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"learner\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"Learner\",\n  \"dateOfBirth\": \"2009-03-14\",\n  \"gender\": \"female\",\n  \"email\": \"invalid-learner@example.com\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "2e98365e-5e52-4598-97d2-57c85d7e9144",
+          "name": "Reject invalid coach signup (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "1da8b2a2-13cc-4e09-b117-aa396789378b",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns 422 with field errors', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  const { errors } = pm.response.json();",
+                  "  pm.expect(errors).to.include.keys('coachingRole', 'team.level', 'team.sport', 'password');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register/coach",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register",
+                "coach"
+              ]
+            },
+            "description": "Wrong coachingRole, team level and password, and no team sport. Coach errors come back as a field-to-message map.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Thabo\",\n  \"lastName\": \"Williams\",\n  \"dateOfBirth\": \"1988-04-12\",\n  \"gender\": \"male\",\n  \"school\": \"Greenwood High\",\n  \"coachingRole\": \"captain\",\n  \"experience\": \"5_10_years\",\n  \"team\": {\n    \"name\": \"Basketball Boys\",\n    \"level\": \"varsity\"\n  },\n  \"email\": \"invalid-coach@example.com\",\n  \"password\": \"short\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "1418d784-7d7c-4218-97ed-b630cb45abbd",
+          "name": "Reject duplicate coach email (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "id": "7edb5fab-9a8f-4fb8-a2e1-3e341ab63f26",
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns 409 EMAIL_TAKEN', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('EMAIL_TAKEN');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register/coach",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register",
+                "coach"
+              ]
+            },
+            "description": "Run after \"Register coach\". Sends the same coachEmail again (no new email is generated here).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Thabo\",\n  \"lastName\": \"Williams\",\n  \"dateOfBirth\": \"1988-04-12\",\n  \"gender\": \"male\",\n  \"school\": \"Greenwood High\",\n  \"coachingRole\": \"head_coach\",\n  \"experience\": \"5_10_years\",\n  \"team\": {\n    \"name\": \"Basketball Boys\",\n    \"level\": \"1st_team\",\n    \"sport\": \"Basketball\"\n  },\n  \"email\": \"{{coachEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "testInbox",
+      "value": "replace-with-your-inbox@example.com",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Passw0rdOK",
+      "type": "string"
+    },
+    {
+      "key": "learnerEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "learnerOtp",
+      "value": "000000",
+      "type": "string"
+    },
+    {
+      "key": "learnerUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "learnerAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "learnerRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "learnerNoSportEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "coachEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "coachOtp",
+      "value": "000000",
+      "type": "string"
+    },
+    {
+      "key": "coachUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "coachAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "coachRefreshToken",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

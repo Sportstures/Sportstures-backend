@@ -126,8 +126,7 @@ router.post(
       const teams = await pool.query(
         `SELECT t.id, t.sport_id, cu.id AS coach_user_id
            FROM teams t
-           LEFT JOIN coaches co ON co.id = t.coach_id
-           LEFT JOIN users cu ON cu.id = co.user_id
+           LEFT JOIN users cu ON cu.id = t.coach_id
           WHERE t.id IN ($1, $2)`,
         [homeTeamId, awayTeamId]
       );

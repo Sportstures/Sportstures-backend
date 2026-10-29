@@ -8,8 +8,42 @@ CREATE TABLE IF NOT EXISTS users (
   first_name VARCHAR(100),
   last_name VARCHAR(100),
   phone VARCHAR(20),
+  role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'player', 'coach', 'admin')),
+  email_verified BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS player_profiles (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  date_of_birth DATE NOT NULL,
+  gender VARCHAR(10) NOT NULL CHECK (gender IN ('male', 'female')),
+  school_name VARCHAR(255) NOT NULL,
+  grade SMALLINT NOT NULL CHECK (grade BETWEEN 1 AND 12),
+  class_name VARCHAR(100) NOT NULL,
+  sport_name VARCHAR(100),
+  team_name VARCHAR(100),
+  jersey_number SMALLINT CHECK (jersey_number IS NULL OR jersey_number BETWEEN 0 AND 999),
+  sport_level VARCHAR(50),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS email_verification_codes (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  code_hash CHAR(64) NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  resend_after TIMESTAMP NOT NULL,
+  attempts SMALLINT NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 5),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash VARCHAR(64) NOT NULL UNIQUE,
+  expires_at TIMESTAMP NOT NULL,
+  revoked BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS coaches (
