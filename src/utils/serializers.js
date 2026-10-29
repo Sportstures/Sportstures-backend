@@ -42,10 +42,8 @@ const FIXTURE_FROM = `FROM fixtures f
     JOIN teams amt ON amt.id = f.away_team_id
     ${teamJoins('hmt', 'h')}
     ${teamJoins('amt', 'a')}
-    LEFT JOIN coaches hco ON hco.id = hmt.coach_id
-    LEFT JOIN users hcu ON hcu.id = hco.user_id
-    LEFT JOIN coaches aco ON aco.id = amt.coach_id
-    LEFT JOIN users acu ON acu.id = aco.user_id
+    LEFT JOIN users hcu ON hcu.id = hmt.coach_id
+    LEFT JOIN users acu ON acu.id = amt.coach_id
     LEFT JOIN competitions comp ON comp.id = f.competition_id
     LEFT JOIN scores sc ON sc.fixture_id = f.id`;
 

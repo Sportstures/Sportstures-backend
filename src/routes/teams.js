@@ -13,8 +13,7 @@ const TEAM_SELECT = `SELECT ${teamSelect('t', 't')},
     cu.id AS coach_user_id, cu.first_name AS coach_first_name, cu.last_name AS coach_last_name
   FROM teams t
   ${teamJoins('t', 't')}
-  LEFT JOIN coaches co ON co.id = t.coach_id
-  LEFT JOIN users cu ON cu.id = co.user_id`;
+  LEFT JOIN users cu ON cu.id = t.coach_id`;
 
 function mapFullTeam(r) {
   return {
@@ -121,20 +120,34 @@ router.post(
       let coachId = null;
       let schoolId = school ? await findOrCreateSchool(pool, school) : null;
       if (req.user.role === 'coach') {
-        const coach = await pool.query('SELECT id, school_id FROM coaches WHERE user_id = $1', [req.user.id]);
-        coachId = coach.rows[0]?.id || null;
+        const coach = await pool.query('SELECT school_id FROM coaches WHERE user_id = $1', [req.user.id]);
+        if (!coach.rows[0]) {
+          return res.status(409).json(errorBody('COACH_PROFILE_MISSING', 'Coach profile is not configured'));
+        }
+        coachId = req.user.id;
+        const existingTeam = await pool.query('SELECT 1 FROM teams WHERE coach_id = $1', [coachId]);
+        if (existingTeam.rows[0]) {
+          return res.status(409).json(errorBody('COACH_TEAM_EXISTS', 'A coach can only have one team'));
+        }
         // Default to the coach's own school when none is given.
-        if (!schoolId) schoolId = coach.rows[0]?.school_id || null;
+        if (!schoolId) schoolId = coach.rows[0].school_id || null;
       }
 
-      const inserted = await pool.query(
-        `INSERT INTO teams (name, coach_id, school_id, sport_id, level, gender_category,
-                            description, location, founded_year)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        [name, coachId, schoolId, sportId || null, level || null, genderCategory || null,
-          description || null, location || null, foundedYear ?? null]
-      );
-      res.status(201).json({ team: mapFullTeam(await loadTeam(inserted.rows[0].id)) });
+      try {
+        const inserted = await pool.query(
+          `INSERT INTO teams (name, coach_id, school_id, sport_id, level, gender_category,
+                              description, location, founded_year)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+          [name, coachId, schoolId, sportId || null, level || null, genderCategory || null,
+            description || null, location || null, foundedYear ?? null]
+        );
+        res.status(201).json({ team: mapFullTeam(await loadTeam(inserted.rows[0].id)) });
+      } catch (err) {
+        if (err.code === '23505' && coachId) {
+          return res.status(409).json(errorBody('COACH_TEAM_EXISTS', 'A coach can only have one team'));
+        }
+        throw err;
+      }
     } catch (err) {
       next(err);
     }
