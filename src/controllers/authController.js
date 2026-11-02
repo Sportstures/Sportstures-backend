@@ -267,96 +267,13 @@ async function withProfile(user) {
   };
 }
 
-async function register(req, res, next) {
+// POST /api/auth/register creates a learner. Coaches use POST /api/auth/register/coach.
+function register(req, res, next) {
   if (['player', 'learner'].includes(req.body.role)) return registerPlayer(req, res, next);
-
-  try {
-    // Sport must be one of the seeded sports (see GET /api/sports).
-    let sportId = null;
-    if (role === 'learner' && sport && sport.name) {
-      const found = await pool.query('SELECT id FROM sports WHERE lower(name) = lower($1)', [sport.name]);
-      if (!found.rows[0]) {
-        return res.status(400).json(errorBody('UNKNOWN_SPORT', 'Unknown sport, use GET /api/sports for valid names'));
-      }
-      sportId = found.rows[0].id;
-    }
-
-    // A coach can coach several sports; each must be a known sport.
-    const coachSportIds = [];
-    if (role === 'coach' && Array.isArray(coach?.sports)) {
-      for (const name of new Set(coach.sports.map((s) => String(s).toLowerCase()))) {
-        const found = await pool.query('SELECT id FROM sports WHERE lower(name) = $1', [name]);
-        if (!found.rows[0]) {
-          return res.status(400).json(errorBody('UNKNOWN_SPORT', `Unknown sport "${name}", use GET /api/sports for valid names`));
-        }
-        coachSportIds.push(found.rows[0].id);
-      }
-    }
-
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-
-    client = await pool.connect();
-    await client.query('BEGIN');
-
-    // Only 'learner' and 'coach' can be chosen here (validated in the route). Admins are set manually.
-    const roleRow = await client.query('SELECT id FROM roles WHERE name = $1', [role]);
-    const inserted = await client.query(
-      `INSERT INTO users (email, password, first_name, last_name, phone, date_of_birth, gender, role_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id`,
-      [email, passwordHash, firstName || null, lastName || null, phone || null,
-        dateOfBirth || null, gender || null, roleRow.rows[0].id]
-    );
-    const userId = inserted.rows[0].id;
-
-    if (role === 'learner') {
-      const schoolId = school && school.name ? await findOrCreateSchool(client, school.name) : null;
-      const hasProfile = schoolId || sportId || school || sport;
-      if (hasProfile) {
-        await client.query(
-          `INSERT INTO learner_profiles
-             (user_id, school_id, grade, class_name, sport_id, team_name, jersey_number, level)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [
-            userId, schoolId,
-            school?.grade ?? null, school?.className || null,
-            sportId, sport?.teamName || null, sport?.jerseyNumber ?? null, sport?.level || null,
-          ]
-        );
-      }
-    } else if (role === 'coach') {
-      const schoolId = coach?.school ? await findOrCreateSchool(client, coach.school) : null;
-      const coachRow = await client.query(
-        `INSERT INTO coaches (user_id, school_id, team_name, team_level, coaching_role, experience)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id`,
-        [userId, schoolId, coach?.teamName || null, coach?.teamLevel || null,
-          coach?.coachingRole || null, coach?.experience || null]
-      );
-      for (const sportIdToAdd of coachSportIds) {
-        await client.query('INSERT INTO coach_sports (coach_id, sport_id) VALUES ($1, $2)', [
-          coachRow.rows[0].id,
-          sportIdToAdd,
-        ]);
-      }
-    }
-
-    await client.query('COMMIT');
-
-    const { rows } = await pool.query(`SELECT ${USER_SELECT} ${USER_FROM} WHERE u.id = $1`, [userId]);
-    const user = await withProfile(rows[0]);
-    const tokens = await issueTokens(user);
-    res.status(201).json({ user, ...tokens });
-  } catch (err) {
-    if (client) await client.query('ROLLBACK').catch(() => {});
-    // 23505 = unique_violation (email already registered)
-    if (err.code === '23505') {
-      return res.status(409).json(errorBody('EMAIL_TAKEN', 'An account with this email already exists'));
-    }
-    next(err);
-  } finally {
-    if (client) client.release();
-  }
+  return res.status(400).json(errorBody(
+    'ROLE_REQUIRED',
+    'Send "role": "learner" to register a learner, or use POST /api/auth/register/coach for coaches'
+  ));
 }
 
 async function login(req, res, next) {
