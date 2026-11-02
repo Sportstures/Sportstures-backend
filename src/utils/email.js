@@ -32,8 +32,22 @@ function createTransport() {
   return nodemailer.createTransport(transportOptions);
 }
 
+// While developing there is usually no mail server. If SMTP is not configured AND the server
+// runs in development or test mode, print the email in the server console instead of failing.
+// In production (or when NODE_ENV is unset) a missing SMTP config is still an error, so codes
+// never end up in production logs by accident.
+function shouldPrintInsteadOfSending() {
+  const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_FROM);
+  return !smtpConfigured && ['development', 'test'].includes(process.env.NODE_ENV);
+}
+
 // Sends a branded email from no-reply. Replies go to the support mailbox instead.
 async function sendEmail({ to, subject, text, html }) {
+  if (shouldPrintInsteadOfSending()) {
+    console.log(`\n[dev email] SMTP is not configured, so this email was not sent.\n  To: ${to}\n  Subject: ${subject}\n`);
+    return;
+  }
+
   await createTransport().sendMail({
     from: process.env.SMTP_FROM,
     replyTo: contactEmail('support'),
