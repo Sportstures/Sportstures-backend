@@ -5,6 +5,7 @@ const validate = require('../middleware/validate');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { errorBody, teamSelect, teamJoins, mapTeam } = require('../utils/serializers');
 const { findOrCreateSchool } = require('../utils/schools');
+const { teamRecord } = require('../utils/standings');
 
 const router = express.Router();
 
@@ -196,6 +197,44 @@ router.patch(
         await pool.query(`UPDATE teams SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
       }
       res.json({ team: mapFullTeam(await loadTeam(req.params.id)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// GET /api/teams/:id/record?competitionId=: win/loss record, win rate, averages and recent form,
+// worked out from the team's finished fixtures. Feeds the season summary and the coach dashboard.
+router.get(
+  '/:id/record',
+  authenticate,
+  [idParam, query('competitionId').optional().isInt({ min: 1 }).toInt()],
+  validate,
+  async (req, res, next) => {
+    try {
+      const team = await loadTeam(req.params.id);
+      if (!team) return res.status(404).json(errorBody('NOT_FOUND', 'Team not found'));
+
+      const params = [req.params.id];
+      let competitionFilter = '';
+      if (req.query.competitionId) {
+        params.push(req.query.competitionId);
+        competitionFilter = 'AND f.competition_id = $2';
+      }
+      const finished = await pool.query(
+        `SELECT f.home_team_id, f.away_team_id, sc.home_team_score, sc.away_team_score
+           FROM fixtures f JOIN scores sc ON sc.fixture_id = f.id
+          WHERE f.status = 'finished' AND (f.home_team_id = $1 OR f.away_team_id = $1) ${competitionFilter}
+          ORDER BY f.match_date, f.id`,
+        params
+      );
+      const record = teamRecord(req.params.id, finished.rows.map((r) => ({
+        homeTeamId: r.home_team_id,
+        awayTeamId: r.away_team_id,
+        homeScore: r.home_team_score,
+        awayScore: r.away_team_score,
+      })));
+      res.json({ team: mapFullTeam(team), record });
     } catch (err) {
       next(err);
     }

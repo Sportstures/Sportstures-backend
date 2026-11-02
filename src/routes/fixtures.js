@@ -210,4 +210,116 @@ router.patch(
   }
 );
 
+// PUT /api/fixtures/:id/result: record (or correct) the final score. Marks the fixture finished.
+// The home team's coach or an admin can do this once the match time has passed.
+router.put(
+  '/:id/result',
+  authenticate,
+  requireRole('coach', 'admin'),
+  [
+    idParam,
+    body('homeScore').isInt({ min: 0, max: 999 }).withMessage('homeScore must be a number from 0 to 999').toInt(),
+    body('awayScore').isInt({ min: 0, max: 999 }).withMessage('awayScore must be a number from 0 to 999').toInt(),
+  ],
+  validate,
+  async (req, res, next) => {
+    let client;
+    try {
+      const row = await loadFixture(req.params.id);
+      if (!row) return res.status(404).json(errorBody('NOT_FOUND', 'Fixture not found'));
+      if (!canManage(req.user, row)) {
+        return res.status(403).json(errorBody('FORBIDDEN', 'You can only record results for a team you coach'));
+      }
+      if (row.status === 'cancelled' || row.status === 'postponed') {
+        return res.status(409).json(errorBody('FIXTURE_NOT_PLAYABLE', `A ${row.status} fixture cannot have a result`));
+      }
+      if (new Date(row.match_date) > new Date()) {
+        return res.status(409).json(errorBody('FIXTURE_NOT_STARTED', 'The match has not been played yet'));
+      }
+
+      client = await pool.connect();
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO scores (fixture_id, home_team_score, away_team_score)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (fixture_id) DO UPDATE
+           SET home_team_score = EXCLUDED.home_team_score,
+               away_team_score = EXCLUDED.away_team_score,
+               updated_at = CURRENT_TIMESTAMP`,
+        [row.id, req.body.homeScore, req.body.awayScore]
+      );
+      await client.query("UPDATE fixtures SET status = 'finished', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [row.id]);
+      await client.query('COMMIT');
+
+      res.json({ fixture: mapFixture(await loadFixture(row.id)) });
+    } catch (err) {
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      next(err);
+    } finally {
+      if (client) client.release();
+    }
+  }
+);
+
+// A match report can be filed by either team's coach, or an admin.
+function canReport(user, row) {
+  return user.role === 'admin'
+    || (user.role === 'coach' && (row.h_coach_user_id === user.id || row.a_coach_user_id === user.id));
+}
+
+function mapReport(r) {
+  return {
+    summary: r.summary,
+    author: r.author_id ? { id: r.author_id, name: [r.first_name, r.last_name].filter(Boolean).join(' ') || null } : null,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+const REPORT_SELECT = `SELECT r.summary, r.author_id, r.created_at, r.updated_at, u.first_name, u.last_name
+  FROM fixture_reports r LEFT JOIN users u ON u.id = r.author_id WHERE r.fixture_id = $1`;
+
+router.get('/:id/report', authenticate, [idParam], validate, async (req, res, next) => {
+  try {
+    const row = await loadFixture(req.params.id);
+    if (!row) return res.status(404).json(errorBody('NOT_FOUND', 'Fixture not found'));
+    const { rows } = await pool.query(REPORT_SELECT, [row.id]);
+    if (!rows[0]) return res.status(404).json(errorBody('REPORT_NOT_FOUND', 'No report has been filed for this fixture'));
+    res.json({ report: mapReport(rows[0]) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/fixtures/:id/report: file the match report, or replace it. One report per fixture.
+router.put(
+  '/:id/report',
+  authenticate,
+  requireRole('coach', 'admin'),
+  [idParam, body('summary').isString().trim().isLength({ min: 1, max: 5000 }).withMessage('summary is required (max 5000 characters)')],
+  validate,
+  async (req, res, next) => {
+    try {
+      const row = await loadFixture(req.params.id);
+      if (!row) return res.status(404).json(errorBody('NOT_FOUND', 'Fixture not found'));
+      if (!canReport(req.user, row)) {
+        return res.status(403).json(errorBody('FORBIDDEN', 'Only a coach of one of the teams can file the report'));
+      }
+      if (row.status !== 'finished') {
+        return res.status(409).json(errorBody('FIXTURE_NOT_FINISHED', 'Record the result before filing the report'));
+      }
+      await pool.query(
+        `INSERT INTO fixture_reports (fixture_id, author_id, summary) VALUES ($1, $2, $3)
+         ON CONFLICT (fixture_id) DO UPDATE
+           SET summary = EXCLUDED.summary, author_id = EXCLUDED.author_id, updated_at = CURRENT_TIMESTAMP`,
+        [row.id, req.user.id, req.body.summary]
+      );
+      const { rows } = await pool.query(REPORT_SELECT, [row.id]);
+      res.json({ report: mapReport(rows[0]) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 module.exports = router;

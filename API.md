@@ -32,6 +32,14 @@ Every error has the same shape:
 | 409 | `EMAIL_TAKEN` | Email already registered |
 | 409 | `COACH_TEAM_EXISTS` | A coach already has a team |
 | 409 | `COACH_PROFILE_MISSING` | Coach account has no coach profile |
+| 400 | `ROLE_REQUIRED` | `POST /api/auth/register` needs `"role": "learner"`; coaches use `/register/coach` |
+| 400 | `UNKNOWN_SPORT` | `sportId` does not exist |
+| 400 | `SAME_TEAM` / `SPORT_MISMATCH` / `UNKNOWN_COMPETITION` | Fixture rules, see Teams, competitions and fixtures |
+| 404 | `NOT_FOUND` | No team, fixture or competition with that id |
+| 404 | `REPORT_NOT_FOUND` | No match report has been filed for the fixture |
+| 409 | `COMPETITION_EXISTS` | A competition with this name already exists |
+| 409 | `FIXTURE_LOCKED` | A live or finished fixture can no longer be edited with PATCH |
+| 409 | `FIXTURE_NOT_STARTED` / `FIXTURE_NOT_PLAYABLE` / `FIXTURE_NOT_FINISHED` | Result or report not allowed in the fixture's current state |
 | 422 | — | Invalid coach signup input; `errors` maps fields to messages |
 | 429 | `TOO_MANY_REQUESTS` | Rate limited; resend also returns a `Retry-After` header |
 
@@ -277,10 +285,14 @@ Body: `{ "name": "...", "sportId": 2, "season": "2026" }` (only `name` required)
                 "sport": { "id": 2, "name": "Basketball" }, "school": { "id": 1, "name": "Jeppe High" } },
   "awayTeam": { "id": 5, "name": "Greenwood Boys", "level": "Varsity", "genderCategory": "boys",
                 "sport": { "id": 2, "name": "Basketball" }, "school": { "id": 3, "name": "Greenwood" } },
-  "score": null
+  "score": null,
+  "winner": null,
+  "reportFiled": false
 }
 ```
 
+- `winner` is `"home"`, `"away"` or `"draw"` once the fixture is finished with a score, otherwise `null`.
+- `reportFiled` is `true` once a match report exists (see Results, standings and reports).
 - `matchDate` is always UTC (ends in `Z`). Convert to local time in the app.
 - `status`: `scheduled`, `live`, `finished`, `cancelled` or `postponed`. The app's "Today" label is worked out from `matchDate`.
 - `matchType`: `league`, `semifinal`, `championship` or `friendly`.
@@ -324,6 +336,87 @@ Edit `matchDate`, `venue`, `competitionId`, `matchType`, or set `status` to `sch
 (this is the app's "Cancel fixture" action). Send only what changes; `null` clears `competitionId`.
 `live` and `finished` cannot be set here; they come from match scoring.
 A live or finished fixture returns `409 FIXTURE_LOCKED`.
+
+## Results, standings and reports
+
+All need `Authorization: Bearer <accessToken>`. Results are listed with the normal fixtures list:
+`GET /api/fixtures?when=past` returns finished fixtures, newest first, each with `score` and `winner`
+(filter with `competitionId`, `teamId`, `sportId` or `mine=true`).
+
+### PUT /api/fixtures/:id/result (home team's coach, or admin)
+
+Records the final score and marks the fixture `finished`. Calling it again corrects the score.
+
+```json
+{ "homeScore": 68, "awayScore": 54 }
+```
+
+Both scores are whole numbers from 0 to 999. Response `200`: `{ "fixture": {...} }` with `status: "finished"`,
+`score` and `winner`.
+
+Errors: `FIXTURE_NOT_STARTED` (the match time has not come yet), `FIXTURE_NOT_PLAYABLE` (the fixture is
+cancelled or postponed), `403 FORBIDDEN` (not the home team's coach), `404 NOT_FOUND`.
+
+### GET /api/competitions/:id/standings
+
+The league table, worked out from finished fixtures. Every team with a fixture in the competition appears, even
+before it has played (cancelled fixtures do not count).
+
+```json
+{
+  "competition": { "id": 1, "name": "Schools League", "season": "2026", "sport": { "id": 2, "name": "Basketball" } },
+  "standings": [
+    { "position": 1,
+      "team": { "id": 6, "name": "Charlie Boys", "level": "1st_team", "genderCategory": null,
+                "sport": { "id": 2, "name": "Basketball" }, "school": { "id": 3, "name": "Charlie High" } },
+      "played": 2, "won": 1, "drawn": 1, "lost": 0,
+      "pointsFor": 105, "pointsAgainst": 95, "difference": 10, "points": 4,
+      "winRate": 50, "averageScored": 52.5, "averageConceded": 47.5,
+      "form": ["D", "W"] }
+  ]
+}
+```
+
+- Points: win 3, draw 1, loss 0.
+- Order: points, then `difference` (`pointsFor` minus `pointsAgainst`), then `pointsFor`, then team name.
+  Teams level on all of those share a `position`.
+- `form` is the last five results, oldest first (`W`, `D` or `L`).
+- `404 NOT_FOUND` for an unknown competition. A competition with no fixtures returns `"standings": []`.
+
+### GET /api/teams/:id/record
+
+A team's record from its finished fixtures. Optional filter: `?competitionId=`. Feeds the coach season summary
+(record, win rate, average scored and conceded, form) and the coach dashboard win rate.
+
+```json
+{ "team": {...},
+  "record": { "played": 2, "won": 1, "drawn": 0, "lost": 1, "pointsFor": 110, "pointsAgainst": 110,
+              "difference": 0, "points": 3, "winRate": 50, "averageScored": 55, "averageConceded": 55,
+              "form": ["W", "L"] } }
+```
+
+`winRate` (percent), `averageScored` and `averageConceded` are `null` until the team has played.
+
+### PUT /api/fixtures/:id/report (either team's coach, or admin)
+
+Files the match report, or replaces it. There is one report per fixture, shared by both coaches.
+
+```json
+{ "summary": "Alpha won 70-60 after a strong fourth quarter." }
+```
+
+`summary` is required (max 5000 characters). Response `200`:
+
+```json
+{ "report": { "summary": "...", "author": { "id": 7, "name": "Sipho Williams" },
+              "createdAt": "2026-11-02T18:30:00.000Z", "updatedAt": "2026-11-02T18:30:00.000Z" } }
+```
+
+Error `FIXTURE_NOT_FINISHED` if the result has not been recorded yet.
+
+### GET /api/fixtures/:id/report
+
+Response `200`: `{ "report": {...} }` (same shape). `404 REPORT_NOT_FOUND` if none has been filed.
 
 ## Protecting a new route (for backend developers)
 
