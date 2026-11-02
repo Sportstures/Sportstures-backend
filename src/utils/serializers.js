@@ -35,7 +35,8 @@ const FIXTURE_SELECT = `f.id, f.match_date, f.status, f.location AS venue, f.mat
     amt.coach_id AS a_coach_id, acu.id AS a_coach_user_id,
     ${teamSelect('hmt', 'h')},
     ${teamSelect('amt', 'a')},
-    sc.home_team_score, sc.away_team_score`;
+    sc.home_team_score, sc.away_team_score,
+    EXISTS (SELECT 1 FROM fixture_reports fr WHERE fr.fixture_id = f.id) AS report_filed`;
 
 const FIXTURE_FROM = `FROM fixtures f
     JOIN teams hmt ON hmt.id = f.home_team_id
@@ -46,6 +47,14 @@ const FIXTURE_FROM = `FROM fixtures f
     LEFT JOIN users acu ON acu.id = amt.coach_id
     LEFT JOIN competitions comp ON comp.id = f.competition_id
     LEFT JOIN scores sc ON sc.fixture_id = f.id`;
+
+// 'home', 'away' or 'draw' once a fixture is finished with a score, otherwise null.
+function winnerOf(row) {
+  if (row.status !== 'finished' || row.home_team_score === null || row.home_team_score === undefined) return null;
+  if (row.home_team_score > row.away_team_score) return 'home';
+  if (row.home_team_score < row.away_team_score) return 'away';
+  return 'draw';
+}
 
 function mapFixture(row) {
   const homeTeam = mapTeam(row, 'h');
@@ -63,6 +72,8 @@ function mapFixture(row) {
     score: row.home_team_score === null || row.home_team_score === undefined
       ? null
       : { home: row.home_team_score, away: row.away_team_score },
+    winner: winnerOf(row),
+    reportFiled: Boolean(row.report_filed),
   };
 }
 
