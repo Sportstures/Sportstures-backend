@@ -17,9 +17,10 @@ const authLimiter = rateLimit({
   message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many attempts, try again later' } },
 });
 
+// Verification-code attempts per IP per 15 minutes (default 10). Tests raise it with OTP_RATE_LIMIT_MAX.
 const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 10,
+  limit: parseInt(process.env.OTP_RATE_LIMIT_MAX, 10) || 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many verification attempts, try again later' } },
