@@ -40,6 +40,10 @@ Every error has the same shape:
 | 409 | `COMPETITION_EXISTS` | A competition with this name already exists |
 | 409 | `FIXTURE_LOCKED` | A live or finished fixture can no longer be edited with PATCH |
 | 409 | `FIXTURE_NOT_STARTED` / `FIXTURE_NOT_PLAYABLE` / `FIXTURE_NOT_FINISHED` | Result or report not allowed in the fixture's current state |
+| 400 | `NOT_A_LEARNER` | Only learners can be added to a team roster |
+| 409 | `ALREADY_MEMBER` / `REQUEST_PENDING` | Learner is already on the team, or has already asked to join |
+| 409 | `JERSEY_TAKEN` | Another active player on the team has that number |
+| 409 | `SCHOOL_MISMATCH` / `TEAM_SCHOOL_REQUIRED` | Learner is not at the team's school, or the team has no school set |
 | 422 | — | Invalid coach signup input; `errors` maps fields to messages |
 | 429 | `TOO_MANY_REQUESTS` | Rate limited; resend also returns a `Retry-After` header |
 
@@ -229,7 +233,8 @@ Lists accept `limit` (default 50, max 100) and `offset`.
 ```json
 { "id": 4, "name": "Basketball Boys", "level": "Varsity", "genderCategory": "boys",
   "sport": { "id": 2, "name": "Basketball" }, "school": { "id": 1, "name": "Jeppe High" },
-  "coach": { "id": 7, "name": "Sipho Williams" }, "description": null, "location": null, "foundedYear": null }
+  "coach": { "id": 7, "name": "Sipho Williams" }, "description": null, "location": null, "foundedYear": null,
+  "playerCount": 12 }
 ```
 
 `coach.id` is the coach's **user id**. `sport`, `school` and `coach` are `null` when not set.
@@ -417,6 +422,89 @@ Error `FIXTURE_NOT_FINISHED` if the result has not been recorded yet.
 ### GET /api/fixtures/:id/report
 
 Response `200`: `{ "report": {...} }` (same shape). `404 REPORT_NOT_FOUND` if none has been filed.
+
+## Team rosters
+
+All need `Authorization: Bearer <accessToken>`. A learner joins a team in one of two ways: they **ask to join**
+and the team's coach approves, or the coach **adds** them directly. A learner can be on several teams.
+
+**Privacy.** Players are school children. A roster is visible only to the team's coach, admins and the team's own
+active players. Everyone else only sees `playerCount` on the team. A learner with a pending request cannot see the roster.
+
+Member object:
+
+```json
+{ "userId": 12, "name": "Lena One", "firstName": "Lena", "lastName": "One",
+  "status": "active", "jerseyNumber": 7, "position": "Guard",
+  "grade": 9, "className": "9A", "joinedAt": "2026-11-03T08:00:00.000Z", "requestedAt": "2026-11-02T15:10:00.000Z" }
+```
+
+`status` is `pending` (asked to join) or `active` (on the team). `jerseyNumber` is 0 to 999 and unique among a
+team's active players. `position` is free text (up to 50 characters) because it differs by sport.
+
+### GET /api/teams/:id/roster
+
+The team's coach, admins and active players. Optional `?status=pending` lists join requests (coach and admin only).
+Ordered by jersey number, then name. Response:
+`{ "team": { "id", "name" }, "status": "active", "count": 3, "roster": [ member, ... ] }`.
+`403 FORBIDDEN` for anyone else.
+
+### POST /api/teams/:id/join-requests (learners)
+
+A learner asks to join. Optional body: `{ "jerseyNumber": 7 }` (the number they would like).
+Response `201`: `{ "member": {...} }` with `status: "pending"`.
+Errors: `REQUEST_PENDING`, `ALREADY_MEMBER` (both `409`), `403` for coaches and admins, `404` for an unknown team.
+
+### DELETE /api/teams/:id/membership
+
+Leave a team, or cancel your own pending request. `404` if you are not on the team.
+
+### GET /api/me/teams
+
+The teams I am on and the ones I have asked to join:
+
+```json
+{ "teams": [ { "status": "active", "jerseyNumber": 7, "position": "Guard", "joinedAt": "...", "requestedAt": "...",
+               "team": { "id": 4, "name": "Alpha Boys", "level": "1st_team", "sport": {...}, "school": {...} } } ] }
+```
+
+### GET /api/teams/:id/candidates?q= (the team's coach, or admin)
+
+Learners at the **team's school** who could be added: verified accounts that are not already on the team (or
+waiting). `q` searches by name. Each candidate:
+
+```json
+{ "userId": 15, "name": "Noah Three", "grade": 9, "className": "9A",
+  "declaredSport": "Basketball", "declaredTeamName": "Alpha Boys", "declaredJerseyNumber": 3 }
+```
+
+`declared...` is what the learner chose at signup. `409 TEAM_SCHOOL_REQUIRED` if the team has no school.
+
+### POST /api/teams/:id/roster (the team's coach, or admin)
+
+Adds a learner straight onto the team, or approves their pending request.
+
+```json
+{ "userId": 15, "jerseyNumber": 3, "position": "Centre" }
+```
+
+Only `userId` is required. Response `201` (added) or `200` (a pending request was approved): `{ "member": {...} }`.
+Errors: `NOT_A_LEARNER` (400), `ALREADY_MEMBER`, `JERSEY_TAKEN`, `SCHOOL_MISMATCH` (coaches can only add learners
+from the team's school; admins can add anyone) (all 409), `404` for an unknown user.
+
+### PATCH /api/teams/:id/roster/:userId (the team's coach, or admin)
+
+Approve a request (`"status": "active"`), or change `jerseyNumber` / `position`. Send only what changes; `null`
+clears a jersey number. `409 JERSEY_TAKEN` if another active player has the number. `404` if the learner is not on the team.
+
+### DELETE /api/teams/:id/roster/:userId (the team's coach, or admin)
+
+Removes a player, or rejects a join request.
+
+### Team object
+
+Every team now includes `"playerCount"`: the number of active players. It is visible to everyone and feeds the
+coach home "Total players" card.
 
 ## Protecting a new route (for backend developers)
 
