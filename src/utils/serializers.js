@@ -36,7 +36,9 @@ const FIXTURE_SELECT = `f.id, f.match_date, f.status, f.location AS venue, f.mat
     ${teamSelect('hmt', 'h')},
     ${teamSelect('amt', 'a')},
     sc.home_team_score, sc.away_team_score,
-    EXISTS (SELECT 1 FROM fixture_reports fr WHERE fr.fixture_id = f.id) AS report_filed`;
+    EXISTS (SELECT 1 FROM fixture_reports fr WHERE fr.fixture_id = f.id) AS report_filed,
+    EXISTS (SELECT 1 FROM fixture_lineups fl WHERE fl.fixture_id = f.id AND fl.team_id = f.home_team_id) AS home_lineup_submitted,
+    EXISTS (SELECT 1 FROM fixture_lineups fl WHERE fl.fixture_id = f.id AND fl.team_id = f.away_team_id) AS away_lineup_submitted`;
 
 const FIXTURE_FROM = `FROM fixtures f
     JOIN teams hmt ON hmt.id = f.home_team_id
@@ -74,6 +76,7 @@ function mapFixture(row) {
       : { home: row.home_team_score, away: row.away_team_score },
     winner: winnerOf(row),
     reportFiled: Boolean(row.report_filed),
+    lineupSubmitted: { home: Boolean(row.home_lineup_submitted), away: Boolean(row.away_lineup_submitted) },
   };
 }
 
