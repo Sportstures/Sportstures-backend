@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const controller = require('../controllers/authController');
 const validate = require('../middleware/validate');
 const { authenticate } = require('../middleware/auth');
+const { PROVINCES } = require('../utils/schools');
 
 const router = express.Router();
 
@@ -65,6 +66,9 @@ const coachSignupRules = [
   body('gender').isIn(['male', 'female']).withMessage('Must be male or female'),
   body('school').isString().trim().notEmpty().withMessage('Required')
     .isLength({ max: 255 }).withMessage('Must be 255 characters or fewer'),
+  body('schoolProvince').optional({ values: 'falsy' }).isIn(PROVINCES).withMessage('Select a valid province'),
+  body('schoolTown').optional({ values: 'falsy' }).isString().trim().isLength({ max: 100 })
+    .withMessage('Must be 100 characters or fewer'),
   body('coachingRole').isIn(['head_coach', 'assistant_coach', 'fitness_coach', 'team_manager'])
     .withMessage('Select a valid coaching role'),
   body('experience').isIn(['less_than_1_year', '1_3_years', '3_5_years', '5_10_years', '10_plus_years'])
@@ -110,6 +114,10 @@ const playerRegistrationRules = [
   body('school').if(isPlayer).isObject({ strict: true }).withMessage('School details are required'),
   body('school.name').if(isPlayer).isString().trim().notEmpty().withMessage('School name is required')
     .isLength({ max: 255 }).withMessage('School name must be 255 characters or fewer'),
+  body('school.province').if(isPlayer).optional({ values: 'falsy' }).isIn(PROVINCES)
+    .withMessage('Province must be one of the 9 provinces'),
+  body('school.town').if(isPlayer).optional({ values: 'falsy' }).isString().trim().isLength({ max: 100 })
+    .withMessage('Town must be 100 characters or fewer'),
   body('school.grade').if(isPlayer).isInt({ min: 1, max: 12 }).withMessage('Grade must be between 1 and 12').toInt(),
   body('school.className').if(isPlayer).isString().trim().notEmpty().withMessage('Class name is required')
     .isLength({ max: 50 }).withMessage('Class name must be 50 characters or fewer'),

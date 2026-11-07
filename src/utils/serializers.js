@@ -10,7 +10,8 @@ function teamSelect(alias, p) {
   return `${alias}.id AS ${p}_id, ${alias}.name AS ${p}_name, ${alias}.level AS ${p}_level,
     ${alias}.gender_category AS ${p}_gender_category,
     ${p}_sp.id AS ${p}_sport_id, ${p}_sp.name AS ${p}_sport_name,
-    ${p}_sc.id AS ${p}_school_id, ${p}_sc.name AS ${p}_school_name`;
+    ${p}_sc.id AS ${p}_school_id, ${p}_sc.name AS ${p}_school_name,
+    ${p}_sc.province AS ${p}_school_province, ${p}_sc.town AS ${p}_school_town`;
 }
 
 function teamJoins(alias, p) {
@@ -25,7 +26,14 @@ function mapTeam(row, p) {
     level: row[`${p}_level`],
     genderCategory: row[`${p}_gender_category`],
     sport: row[`${p}_sport_id`] ? { id: row[`${p}_sport_id`], name: row[`${p}_sport_name`] } : null,
-    school: row[`${p}_school_id`] ? { id: row[`${p}_school_id`], name: row[`${p}_school_name`] } : null,
+    school: row[`${p}_school_id`]
+      ? {
+        id: row[`${p}_school_id`],
+        name: row[`${p}_school_name`],
+        province: row[`${p}_school_province`] || null,
+        town: row[`${p}_school_town`] || null,
+      }
+      : null,
   };
 }
 
