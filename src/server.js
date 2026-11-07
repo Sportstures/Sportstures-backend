@@ -28,6 +28,7 @@ app.use('/api/sports', require('./routes/sports'));
 app.use('/api/competitions', require('./routes/competitions'));
 app.use('/api/teams', require('./routes/teams'));
 app.use('/api/fixtures', require('./routes/fixtures'));
+app.use('/api/fixtures', require('./routes/lineups'));
 app.use('/api/teams', require('./routes/roster'));
 app.use('/api/me', require('./routes/me'));
 

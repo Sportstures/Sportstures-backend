@@ -292,12 +292,14 @@ Body: `{ "name": "...", "sportId": 2, "season": "2026" }` (only `name` required)
                 "sport": { "id": 2, "name": "Basketball" }, "school": { "id": 3, "name": "Greenwood" } },
   "score": null,
   "winner": null,
-  "reportFiled": false
+  "reportFiled": false,
+  "lineupSubmitted": { "home": false, "away": false }
 }
 ```
 
 - `winner` is `"home"`, `"away"` or `"draw"` once the fixture is finished with a score, otherwise `null`.
 - `reportFiled` is `true` once a match report exists (see Results, standings and reports).
+- `lineupSubmitted` says whether each team has submitted its lineup (see Match lineups).
 - `matchDate` is always UTC (ends in `Z`). Convert to local time in the app.
 - `status`: `scheduled`, `live`, `finished`, `cancelled` or `postponed`. The app's "Today" label is worked out from `matchDate`.
 - `matchType`: `league`, `semifinal`, `championship` or `friendly`.
@@ -505,6 +507,61 @@ Removes a player, or rejects a join request.
 
 Every team now includes `"playerCount"`: the number of active players. It is visible to everyone and feeds the
 coach home "Total players" card.
+
+## Match lineups
+
+All need `Authorization: Bearer <accessToken>`. Each of the two teams in a fixture submits its own lineup: the
+starters and the bench. Players must be **active members of that team's roster** (see Team rosters). The jersey
+number and position are copied from the roster when the lineup is submitted, so the match sheet stays correct even
+if the roster changes later. Fixtures include `"lineupSubmitted": { "home": true, "away": false }`, which feeds
+the coach home "Submit match lineup" action.
+
+**Privacy.** Before kick-off a lineup is visible only to that team's coach, admins and the team's active players.
+Once the fixture is `live` or `finished` both lineups are public. Everyone can see that a lineup was submitted.
+
+Lineup object:
+
+```json
+{ "team": { "id": 4, "name": "Alpha Boys" }, "formation": "4-4-2",
+  "starters": [ { "userId": 12, "name": "Pat Player", "jerseyNumber": 4, "position": "Guard" } ],
+  "bench":    [ { "userId": 14, "name": "Rae Player", "jerseyNumber": 12, "position": null } ],
+  "submittedAt": "2026-11-07T08:00:00.000Z", "updatedAt": "2026-11-07T08:00:00.000Z" }
+```
+
+### GET /api/fixtures/:id/lineups
+
+```json
+{ "fixtureId": 9, "public": false,
+  "home": { "teamId": 4, "submitted": true,  "lineup": { ... } },
+  "away": { "teamId": 5, "submitted": true,  "lineup": null } }
+```
+
+`lineup` is `null` when nothing was submitted, or when the caller is not allowed to see it yet.
+
+### PUT /api/fixtures/:id/lineups/:teamId (the team's coach, or admin)
+
+Submits the lineup, or replaces the one already there.
+
+```json
+{ "formation": "4-4-2",
+  "starters": [ { "userId": 12 }, { "userId": 13, "position": "Wing" } ],
+  "bench": [ { "userId": 14 } ] }
+```
+
+`starters` (1 to 25) is required. `formation` (max 30 characters), `bench` (max 25) and `position` (max 50) are
+optional. A `position` given here overrides the roster one for this match. Response `200`: `{ "lineup": {...} }`.
+
+| Status | Code | Meaning |
+|---|---|---|
+| 400 | `TEAM_NOT_IN_FIXTURE` | `:teamId` is not one of the two teams |
+| 403 | `FORBIDDEN` | Not that team's coach (the opposing coach is also refused) |
+| 409 | `FIXTURE_CLOSED` | The fixture is finished or cancelled |
+| 422 | `NOT_ON_TEAM` | A player is not an active member of the team. `error.details.userIds` lists them |
+| 422 | `DUPLICATE_PLAYER` | A player appears twice (including starter and bench) |
+
+### DELETE /api/fixtures/:id/lineups/:teamId (the team's coach, or admin)
+
+Withdraws the lineup. `204` on success, `404 LINEUP_NOT_FOUND` if none was submitted, `409 FIXTURE_CLOSED` as above.
 
 ## Protecting a new route (for backend developers)
 
