@@ -61,7 +61,7 @@ async function registerPlayer(req, res, next) {
     );
     if (!roleRows[0]) throw new Error('Learner role is not configured in the roles table');
 
-    const schoolId = await findOrCreateSchool(client, school.name);
+    const schoolId = await findOrCreateSchool(client, school.name, { province: school.province, town: school.town });
     const sportRecord = sport && sport.name ? await findOrCreateSport(client, sport.name) : null;
     const { rows: userRows } = await client.query(
       `INSERT INTO users
@@ -118,7 +118,7 @@ async function registerCoach(req, res, next) {
   try {
     const {
       email, password, firstName, lastName, dateOfBirth, gender, school,
-      coachingRole, experience, team,
+      coachingRole, experience, team, schoolProvince, schoolTown,
     } = req.body;
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     client = await pool.connect();
@@ -131,7 +131,7 @@ async function registerCoach(req, res, next) {
     );
     if (!roleRows[0]) throw new Error('Coach role is not configured in the roles table');
 
-    const schoolId = await findOrCreateSchool(client, school);
+    const schoolId = await findOrCreateSchool(client, school, { province: schoolProvince, town: schoolTown });
     const sport = await findOrCreateSport(client, team.sport);
     const { rows: userRows } = await client.query(
       `INSERT INTO users

@@ -12,6 +12,7 @@ All requests and responses are JSON. Protected routes need the header
 The read-only match data is public so the website can show it to visitors:
 
 - `GET /api/sports`
+- `GET /api/schools` and `GET /api/schools/:id`
 - `GET /api/fixtures` and `GET /api/fixtures/:id`
 - `GET /api/competitions` and `GET /api/competitions/:id/standings`
 - `GET /api/teams`, `GET /api/teams/:id` and `GET /api/teams/:id/record`
@@ -129,6 +130,8 @@ present, its name can be any non-empty text up to 100 characters. Passwords
 must be 8 to 72 characters with at least one letter and one number. Learner
 and coach school records use the same case-insensitive `schools` table.
 
+Optional: `school.province` and `school.town` say where the school is (see Schools for the provinces).
+
 Learner response `201`:
 
 ```json
@@ -170,6 +173,8 @@ Allowed `coachingRole` values are `head_coach`, `assistant_coach`,
 `10_plus_years`. Allowed team levels are `u13`, `u14`, `u15`, `u16`, `u17`,
 `u19`, `1st_team`, and `2nd_team`. The sport is free text up to 40 characters.
 Password length is 8–72 characters.
+
+Optional: `schoolProvince` (one of the provinces listed under Schools) and `schoolTown` say where the school is.
 
 Response `201`: `{ "userId": 42, "status": "pending_verification" }`.
 The backend sends a six-digit code by email. Duplicate email returns `409
@@ -233,6 +238,27 @@ Body: `{ "refreshToken": "..." }`. Response `200`: `{ "message": "Logged out" }`
 
 Response `200`: `{ "user": { ... } }` (same user object as register, including `profile`).
 
+## Schools
+
+Schools are created automatically from signup (by name, ignoring case). Provinces are exactly:
+Eastern Cape, Free State, Gauteng, KwaZulu-Natal, Limpopo, Mpumalanga, North West, Northern Cape, Western Cape.
+
+School object: `{ "id": 1, "name": "Northview High", "province": "Gauteng", "town": "Sandton", "teamCount": 4, "sports": ["Basketball", "Football"] }`.
+`province` and `town` are `null` when unknown.
+
+### GET /api/schools (public)
+
+Filters: `province`, `q` (name search), `limit` (max 100), `offset`. Response: `{ "schools": [...], "limit", "offset" }`.
+
+### GET /api/schools/:id (public)
+
+Response: `{ "school": {...} }`, or `404`.
+
+### PATCH /api/schools/:id (admin, or a coach with a team at the school)
+
+Body: `{ "province": "Gauteng", "town": "Sandton" }`. Send only what changes; `null` clears a field.
+A signup never overwrites a province or town that is already set. Another school's coach gets `403`.
+
 ## Teams, competitions and fixtures
 
 All of these need `Authorization: Bearer <accessToken>`. A **team** is one sport at one school, with a level
@@ -246,12 +272,13 @@ Lists accept `limit` (default 50, max 100) and `offset`.
 
 ```json
 { "id": 4, "name": "Basketball Boys", "level": "Varsity", "genderCategory": "boys",
-  "sport": { "id": 2, "name": "Basketball" }, "school": { "id": 1, "name": "Jeppe High" },
+  "sport": { "id": 2, "name": "Basketball" },
+  "school": { "id": 1, "name": "Jeppe High", "province": "Gauteng", "town": "Sandton" },
   "coach": { "id": 7, "name": "Sipho Williams" }, "description": null, "location": null, "foundedYear": null,
   "playerCount": 12 }
 ```
 
-`coach.id` is the coach's **user id**. `sport`, `school` and `coach` are `null` when not set.
+`school.province` and `school.town` are `null` until someone sets them. `coach.id` is the coach's **user id**. `sport`, `school` and `coach` are `null` when not set.
 
 ### GET /api/teams
 

@@ -49,6 +49,10 @@ See [Environment variables](#environment-variables) for what each one does.
    5. `db/migrations/003_free_text_player_sport.sql`
    6. `db/migrations/004_teams_competitions_fixtures.sql`
    7. `db/migrations/005_coach_signup_api.sql`
+   8. `db/migrations/006_match_reports.sql`
+   9. `db/migrations/007_team_members.sql`
+   10. `db/migrations/008_match_lineups.sql`
+   11. `db/migrations/009_school_location.sql`
 
 Migration 005 converts existing `teams.coach_id` values from coach profile IDs to user IDs and
 enforces one team per coach.
@@ -152,6 +156,23 @@ Backend/
 ├── .env.example           # Template for .env
 └── docker-compose.yml     # PostgreSQL and pgAdmin
 ```
+
+## Demo data
+
+To fill your **development** database with demo schools, teams, coaches, fixtures and results (so the
+website and mobile app have something to show):
+
+```bash
+npm run seed:demo            # adds the demo data (does nothing if it is already there)
+npm run seed:demo -- --reset # removes the demo data, then adds it again
+```
+
+It creates 8 schools across 4 provinces, 32 teams (each with its own coach), a league per sport, and
+about 70 fixtures: roughly 60% already played with scores, the rest coming up in the next three weeks.
+Log in as `coach1@demo.sportstures.test` or `learner@demo.sportstures.test` with the password
+`DemoPass1`. Everything it creates belongs to `@demo.sportstures.test` accounts, so `--reset`
+removes only that and never touches real users or matches. It refuses to run when `NODE_ENV=production`.
+It adds data to whichever database `DB_NAME` points at, so check that first.
 
 ## Useful commands
 
