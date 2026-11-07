@@ -3,32 +3,11 @@ const { body, query, param } = require('express-validator');
 const pool = require('../../db/config');
 const validate = require('../middleware/validate');
 const { authenticate, optionalAuthenticate, requireUser, requireRole } = require('../middleware/auth');
-const { errorBody, teamSelect, teamJoins, mapTeam } = require('../utils/serializers');
+const { errorBody, FULL_TEAM_SELECT: TEAM_SELECT, mapFullTeam } = require('../utils/serializers');
 const { findOrCreateSchool } = require('../utils/schools');
 const { teamRecord } = require('../utils/standings');
 
 const router = express.Router();
-
-const TEAM_SELECT = `SELECT ${teamSelect('t', 't')},
-    t.description, t.location, t.founded_year, t.coach_id,
-    cu.id AS coach_user_id, cu.first_name AS coach_first_name, cu.last_name AS coach_last_name,
-    (SELECT count(*)::int FROM team_members tm WHERE tm.team_id = t.id AND tm.status = 'active') AS player_count
-  FROM teams t
-  ${teamJoins('t', 't')}
-  LEFT JOIN users cu ON cu.id = t.coach_id`;
-
-function mapFullTeam(r) {
-  return {
-    ...mapTeam(r, 't'),
-    description: r.description,
-    location: r.location,
-    foundedYear: r.founded_year,
-    playerCount: r.player_count,
-    coach: r.coach_user_id
-      ? { id: r.coach_user_id, name: [r.coach_first_name, r.coach_last_name].filter(Boolean).join(' ') || null }
-      : null,
-  };
-}
 
 async function loadTeam(id) {
   const { rows } = await pool.query(`${TEAM_SELECT} WHERE t.id = $1`, [id]);
