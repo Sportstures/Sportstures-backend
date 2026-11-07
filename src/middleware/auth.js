@@ -44,6 +44,21 @@ async function authenticate(req, res, next) {
   }
 }
 
+// For public read-only routes. No Authorization header means an anonymous visitor (req.user stays
+// undefined). A header that IS sent must be valid, so an expired token still answers TOKEN_EXPIRED and
+// the client can refresh. Routes that need the person (like ?mine=true) use requireUser.
+function optionalAuthenticate(req, res, next) {
+  if (!req.headers.authorization) return next();
+  return authenticate(req, res, next);
+}
+
+// Answers 401 NO_TOKEN when a public route is used in a way that needs a signed-in person.
+function requireUser(req, res) {
+  if (req.user) return true;
+  res.status(401).json({ error: { code: 'NO_TOKEN', message: 'Authentication required' } });
+  return false;
+}
+
 // Use after authenticate: router.post('/', authenticate, requireRole('admin', 'coach'), handler)
 function requireRole(...roles) {
   return (req, res, next) => {
@@ -56,4 +71,4 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { authenticate, requireRole };
+module.exports = { authenticate, optionalAuthenticate, requireUser, requireRole };

@@ -2,7 +2,7 @@ const express = require('express');
 const { body, query, param } = require('express-validator');
 const pool = require('../../db/config');
 const validate = require('../middleware/validate');
-const { authenticate, requireRole } = require('../middleware/auth');
+const { authenticate, optionalAuthenticate, requireRole } = require('../middleware/auth');
 const { errorBody, teamSelect, teamJoins, mapTeam } = require('../utils/serializers');
 const { buildTable } = require('../utils/standings');
 
@@ -23,7 +23,7 @@ function mapCompetition(r) {
 // GET /api/competitions?sportId=3
 router.get(
   '/',
-  authenticate,
+  optionalAuthenticate,
   [query('sportId').optional().isInt({ min: 1 }).toInt()],
   validate,
   async (req, res, next) => {
@@ -46,7 +46,7 @@ router.get(
 // Every team with a (non-cancelled) fixture in the competition appears, even before it has played.
 router.get(
   '/:id/standings',
-  authenticate,
+  optionalAuthenticate,
   [param('id').isInt({ min: 1 }).withMessage('id must be a number').toInt()],
   validate,
   async (req, res, next) => {

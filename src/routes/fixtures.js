@@ -2,7 +2,7 @@ const express = require('express');
 const { body, query, param } = require('express-validator');
 const pool = require('../../db/config');
 const validate = require('../middleware/validate');
-const { authenticate, requireRole } = require('../middleware/auth');
+const { authenticate, optionalAuthenticate, requireUser, requireRole } = require('../middleware/auth');
 const { errorBody, FIXTURE_SELECT, FIXTURE_FROM, mapFixture } = require('../utils/serializers');
 
 const router = express.Router();
@@ -34,9 +34,10 @@ async function checkReferences({ competitionId }) {
 // GET /api/fixtures
 //   teamId, sportId, competitionId, status, from, to (ISO dates), mine=true (teams I coach),
 //   when=upcoming|past, order=asc|desc, limit, offset
+// Public: no login needed (mine=true does need one).
 router.get(
   '/',
-  authenticate,
+  optionalAuthenticate,
   [
     query('teamId').optional().isInt({ min: 1 }).toInt(),
     query('sportId').optional().isInt({ min: 1 }).toInt(),
@@ -54,6 +55,7 @@ router.get(
   async (req, res, next) => {
     try {
       const { teamId, sportId, competitionId, status, when, from, to, mine } = req.query;
+      if (mine && !requireUser(req, res)) return;
       const limit = req.query.limit || 50;
       const offset = req.query.offset || 0;
       const where = [];
@@ -89,7 +91,7 @@ router.get(
   }
 );
 
-router.get('/:id', authenticate, [idParam], validate, async (req, res, next) => {
+router.get('/:id', optionalAuthenticate, [idParam], validate, async (req, res, next) => {
   try {
     const row = await loadFixture(req.params.id);
     if (!row) return res.status(404).json(errorBody('NOT_FOUND', 'Fixture not found'));

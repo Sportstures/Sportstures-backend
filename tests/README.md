@@ -21,6 +21,7 @@ the verification codes directly.
 | `results.test.js`, `standings.test.js` | Recording results, league tables, team records, match reports |
 | `roster.test.js` | Joining teams, approvals, jersey numbers, roster privacy |
 | `lineups.test.js` | Submitting lineups, roster checks, lineup privacy, locking |
+| `public-reads.test.js` | Which routes need no login, and which stay private |
 | `migrations.test.js` | A fresh install works, migrations can be re-run, old users move to the roles table |
 
 ## Adding tests when you add a feature

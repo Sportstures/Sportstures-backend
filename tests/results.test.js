@@ -143,7 +143,7 @@ test('standings for an empty or unknown competition', async () => {
   assert.deepEqual(res.body.standings, []);
   assert.equal((await t.api('GET', '/api/competitions/99999/standings', undefined, learner.token)).status, 404);
   assert.equal((await t.api('GET', '/api/competitions/abc/standings', undefined, learner.token)).status, 400);
-  assert.equal((await t.api('GET', `/api/competitions/${league.id}/standings`)).status, 401);
+  assert.equal((await t.api('GET', `/api/competitions/${league.id}/standings`)).status, 200, 'standings are public');
 });
 
 // ---------------------------------------------------------------- team record
