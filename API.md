@@ -7,6 +7,20 @@ Base URL (local): `http://localhost:5000`
 All requests and responses are JSON. Protected routes need the header
 `Authorization: Bearer <accessToken>`.
 
+## Public routes (no login needed)
+
+The read-only match data is public so the website can show it to visitors:
+
+- `GET /api/sports`
+- `GET /api/fixtures` and `GET /api/fixtures/:id`
+- `GET /api/competitions` and `GET /api/competitions/:id/standings`
+- `GET /api/teams`, `GET /api/teams/:id` and `GET /api/teams/:id/record`
+
+Everything else needs a login: rosters, join requests, lineups, match reports, `/api/me/...`, and every write.
+`?mine=true` on the fixture and team lists also needs one (`401 NO_TOKEN` without it).
+If a request **does** send an `Authorization` header it must be valid, so an expired token still answers
+`TOKEN_EXPIRED` and the client can refresh. Team objects include the coach's name.
+
 ## Errors
 
 Every error has the same shape:

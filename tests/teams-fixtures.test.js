@@ -199,7 +199,7 @@ test('fixture list: upcoming, past with score, mine, team, sport, competition, d
   assert.deepEqual(ids(await t.api('GET', '/api/fixtures?status=finished', undefined, learner.token)), [playedId]);
   assert.equal((await t.api('GET', '/api/fixtures?status=nonsense', undefined, learner.token)).status, 400);
   assert.equal((await t.api('GET', '/api/fixtures?limit=2', undefined, learner.token)).body.fixtures.length, 2);
-  assert.equal((await t.api('GET', '/api/fixtures')).status, 401);
+  assert.equal((await t.api('GET', '/api/fixtures')).status, 200, 'fixtures are public');
 });
 
 test('get one fixture, missing fixture', async () => {

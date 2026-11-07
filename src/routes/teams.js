@@ -2,7 +2,7 @@ const express = require('express');
 const { body, query, param } = require('express-validator');
 const pool = require('../../db/config');
 const validate = require('../middleware/validate');
-const { authenticate, requireRole } = require('../middleware/auth');
+const { authenticate, optionalAuthenticate, requireUser, requireRole } = require('../middleware/auth');
 const { errorBody, teamSelect, teamJoins, mapTeam } = require('../utils/serializers');
 const { findOrCreateSchool } = require('../utils/schools');
 const { teamRecord } = require('../utils/standings');
@@ -56,7 +56,7 @@ const teamFields = [
 // GET /api/teams?sportId=&schoolId=&q=&mine=true&limit=&offset=
 router.get(
   '/',
-  authenticate,
+  optionalAuthenticate,
   [
     query('sportId').optional().isInt({ min: 1 }).toInt(),
     query('schoolId').optional().isInt({ min: 1 }).toInt(),
@@ -69,6 +69,7 @@ router.get(
   async (req, res, next) => {
     try {
       const { sportId, schoolId, mine, q } = req.query;
+      if (mine && !requireUser(req, res)) return;
       const limit = req.query.limit || 50;
       const offset = req.query.offset || 0;
       const where = [];
@@ -93,7 +94,7 @@ router.get(
   }
 );
 
-router.get('/:id', authenticate, [idParam], validate, async (req, res, next) => {
+router.get('/:id', optionalAuthenticate, [idParam], validate, async (req, res, next) => {
   try {
     const team = await loadTeam(req.params.id);
     if (!team) return res.status(404).json(errorBody('NOT_FOUND', 'Team not found'));
@@ -209,7 +210,7 @@ router.patch(
 // worked out from the team's finished fixtures. Feeds the season summary and the coach dashboard.
 router.get(
   '/:id/record',
-  authenticate,
+  optionalAuthenticate,
   [idParam, query('competitionId').optional().isInt({ min: 1 }).toInt()],
   validate,
   async (req, res, next) => {
