@@ -604,6 +604,43 @@ optional. A `position` given here overrides the roster one for this match. Respo
 
 Withdraws the lineup. `204` on success, `404 LINEUP_NOT_FOUND` if none was submitted, `409 FIXTURE_CLOSED` as above.
 
+## Coach dashboard
+
+### GET /api/coach/dashboard (coaches only)
+
+The coach's home screen in one request, about the logged-in coach's own team. Admins and learners get `403`;
+a coach with no team gets `404 TEAM_NOT_FOUND`.
+
+```json
+{
+  "team": { "id": 4, "name": "Alpha Boys", "...": "same as the team object" },
+  "squadSize": 12,
+  "pendingRequests": 2,
+  "record": { "played": 5, "won": 3, "drawn": 1, "lost": 1, "winRate": 60, "form": ["W","L","D","W","W"], "...": "see Results" },
+  "nextMatch": { "...": "a fixture object, or null" },
+  "upcoming": [ { "...": "next 5 scheduled or live fixtures, soonest first" } ],
+  "recentResults": [ { "...": "last 5 finished fixtures, newest first" } ],
+  "actionItems": [
+    { "type": "record_result", "dueAt": "2026-11-05T13:00:00.000Z", "fixture": { "...": "fixture" } },
+    { "type": "submit_lineup", "dueAt": "2026-11-09T13:00:00.000Z", "fixture": { "...": "fixture" } },
+    { "type": "file_report", "dueAt": "2026-11-01T13:00:00.000Z", "fixture": { "...": "fixture" } },
+    { "type": "review_join_requests", "dueAt": null, "count": 2 }
+  ]
+}
+```
+
+`squadSize` counts active players. `record` covers every finished fixture (see Results, standings and reports).
+A match stays in `upcoming` until 4 hours after kick-off. Action items, most urgent first:
+
+| `type` | When it appears | Goes away when |
+|---|---|---|
+| `record_result` | A match **your team hosts** is over (4 hours after kick-off) with no result | You record the result |
+| `submit_lineup` | A scheduled match in the next 7 days has no lineup from **your team** | You submit it |
+| `file_report` | A match your team played in the last 30 days has no report (either coach can file it) | A report is filed |
+| `review_join_requests` | Players are waiting to join (`count`) | You approve or reject them |
+
+Cancelled matches never produce items.
+
 ## Protecting a new route (for backend developers)
 
 ```js

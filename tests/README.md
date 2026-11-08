@@ -24,6 +24,7 @@ the verification codes directly.
 | `public-reads.test.js` | Which routes need no login, and which stay private |
 | `schools.test.js` | School province and town, the schools endpoints, who can edit them |
 | `seed-demo.test.js` | The demo data script: contents, repeatable, reset leaves real data alone |
+| `coach-dashboard.test.js` | The coach home summary: squad, record, next match, action items |
 | `migrations.test.js` | A fresh install works, migrations can be re-run, old users move to the roles table |
 
 ## Adding tests when you add a feature

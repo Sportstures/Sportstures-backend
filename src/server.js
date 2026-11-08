@@ -32,6 +32,7 @@ app.use('/api/fixtures', require('./routes/fixtures'));
 app.use('/api/fixtures', require('./routes/lineups'));
 app.use('/api/teams', require('./routes/roster'));
 app.use('/api/me', require('./routes/me'));
+app.use('/api/coach', require('./routes/coach'));
 
 // Routes placeholder (to be implemented)
 // app.use('/api/users', require('./routes/users'));
