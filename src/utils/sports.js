@@ -12,4 +12,19 @@ async function findOrCreateSport(db, name) {
   return inserted.rows[0];
 }
 
-module.exports = { findOrCreateSport };
+// The Favourite Sports screen's groups, in screen order. Sports without a category are "Other".
+const CATEGORIES = [
+  { key: 'team', label: 'Team Sports' },
+  { key: 'athletics', label: 'Athletics & Endurance' },
+  { key: 'racket', label: 'Racket Sports' },
+  { key: 'water', label: 'Water Sports' },
+  { key: 'combat', label: 'Combat Sports' },
+  { key: 'precision', label: 'Precision & Outdoor' },
+  { key: 'mind', label: 'Mind & Heritage' },
+  { key: 'other', label: 'Other' },
+];
+
+const SPORT_SELECT = 'SELECT id, name, key, category FROM sports';
+const mapSport = (r) => ({ id: r.id, name: r.name, key: r.key || null, category: r.category || 'other' });
+
+module.exports = { findOrCreateSport, CATEGORIES, SPORT_SELECT, mapSport };

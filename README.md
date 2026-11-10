@@ -53,6 +53,8 @@ See [Environment variables](#environment-variables) for what each one does.
    9. `db/migrations/007_team_members.sql`
    10. `db/migrations/008_match_lineups.sql`
    11. `db/migrations/009_school_location.sql`
+   12. `db/migrations/010_competition_details.sql`
+   13. `db/migrations/011_favourites.sql`
 
 Migration 005 converts existing `teams.coach_id` values from coach profile IDs to user IDs and
 enforces one team per coach.

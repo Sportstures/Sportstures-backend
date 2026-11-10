@@ -1,4 +1,5 @@
 // SQL fragments and mappers so teams and fixtures look the same in every endpoint.
+const { ageGroupOf } = require('./rankings');
 
 function errorBody(code, message) {
   return { error: { code, message } };
@@ -88,6 +89,25 @@ function mapFixture(row) {
   };
 }
 
+// "u19" -> "U/19", "1st_team" -> "1st Team"; free text such as "Varsity" is kept.
+function levelLabel(level) {
+  const value = (level || '').trim();
+  const under = /^u\s*\/?\s*(\d+)$/i.exec(value);
+  if (under) return `U/${under[1]}`;
+  if (value.toLowerCase() === '1st_team') return '1st Team';
+  if (value.toLowerCase() === '2nd_team') return '2nd Team';
+  return value.replace(/_/g, ' ');
+}
+
+// The label the result and fixture cards show, e.g. "Football U/19" or "Girls Netball 1st Team".
+function categoryLabel(team, sport) {
+  return [
+    team && team.genderCategory === 'girls' ? 'Girls' : '',
+    sport ? sport.name : '',
+    levelLabel(team && team.level),
+  ].filter(Boolean).join(' ');
+}
+
 // A team with its description, coach and active player count: the shape every team endpoint returns.
 const FULL_TEAM_SELECT = `SELECT ${teamSelect('t', 't')},
     t.description, t.location, t.founded_year, t.coach_id,
@@ -98,8 +118,10 @@ const FULL_TEAM_SELECT = `SELECT ${teamSelect('t', 't')},
   LEFT JOIN users cu ON cu.id = t.coach_id`;
 
 function mapFullTeam(r) {
+  const team = mapTeam(r, 't');
   return {
-    ...mapTeam(r, 't'),
+    ...team,
+    ageGroup: ageGroupOf(team.level), // "U/14", "U/16", "U/19" or "Open", as the app's filters use
     description: r.description,
     location: r.location,
     foundedYear: r.founded_year,
@@ -112,4 +134,5 @@ function mapFullTeam(r) {
 
 module.exports = {
   errorBody, teamSelect, teamJoins, mapTeam, FIXTURE_SELECT, FIXTURE_FROM, mapFixture, FULL_TEAM_SELECT, mapFullTeam,
+  levelLabel, categoryLabel,
 };
