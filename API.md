@@ -11,14 +11,16 @@ All requests and responses are JSON. Protected routes need the header
 
 The read-only match data is public so the website can show it to visitors:
 
-- `GET /api/sports`
+- `GET /api/sports` and `GET /api/sports/categories`
 - `GET /api/schools` and `GET /api/schools/:id`
 - `GET /api/fixtures` and `GET /api/fixtures/:id`
-- `GET /api/competitions` and `GET /api/competitions/:id/standings`
+- `GET /api/results`, `GET /api/results/filters` and `GET /api/results/standings`
+- `GET /api/rankings`, `GET /api/rankings/overview` and `GET /api/rankings/filters`
+- `GET /api/competitions`, `GET /api/competitions/:id` and `GET /api/competitions/:id/standings`
 - `GET /api/teams`, `GET /api/teams/:id` and `GET /api/teams/:id/record`
 
 Everything else needs a login: rosters, join requests, lineups, match reports, `/api/me/...`, and every write.
-`?mine=true` on the fixture and team lists also needs one (`401 NO_TOKEN` without it).
+`?mine=true` and `?favorites=true` on the fixture and team lists also need one (`401 NO_TOKEN` without it).
 If a request **does** send an `Authorization` header it must be valid, so an expired token still answers
 `TOKEN_EXPIRED` and the client can refresh. Team objects include the coach's name.
 
@@ -275,14 +277,32 @@ Lists accept `limit` (default 50, max 100) and `offset`.
   "sport": { "id": 2, "name": "Basketball" },
   "school": { "id": 1, "name": "Jeppe High", "province": "Gauteng", "town": "Sandton" },
   "coach": { "id": 7, "name": "Sipho Williams" }, "description": null, "location": null, "foundedYear": null,
-  "playerCount": 12 }
+  "playerCount": 12, "ageGroup": "Open", "favorite": false }
 ```
 
 `school.province` and `school.town` are `null` until someone sets them. `coach.id` is the coach's **user id**. `sport`, `school` and `coach` are `null` when not set.
+`ageGroup` is worked out from `level`:
+- `u13`–`u14` → `U/14`
+- `u15`–`u16` → `U/16`
+- `u17`–`u19` → `U/19`
+- anything else (`1st_team`, `Varsity`, none) → `Open`
+
+`favorite` (on `GET /api/teams` and `GET /api/teams/:id`) says whether the signed-in person has favourited the
+team; it is always `false` without a token.
 
 ### GET /api/teams
 
-Filters: `sportId`, `schoolId`, `q` (name search), `mine=true` (teams I coach).
+Filters:
+- `sportId` and `schoolId`
+- `q`: part of the team's **or its school's** name, any case
+- `mine=true`: teams I coach
+- `favorites=true`: my favourite teams
+- `favorites=false`: every team except my favourites
+
+`favorites` needs a login.
+
+For the Favourite Teams screen, call `?favorites=true` for "Your teams" and `?favorites=false&q=&sportId=` for
+"Add teams". Each row's "Football · U/19 · Gauteng" line is `sport.name · ageGroup · school.province`.
 Response: `{ "teams": [...], "limit": 50, "offset": 0 }`.
 
 ### GET /api/teams/:id
@@ -304,17 +324,72 @@ Send only the fields to change; send `null` to clear one. `403 FORBIDDEN` for an
 
 ### GET /api/competitions
 
-Filter: `sportId`. Response:
+The learner Competitions screen. Public; send a token to get `following` for that person.
+
+| Parameter | Meaning |
+|---|---|
+| `status` | `ongoing`, `upcoming` or `completed`: the status tabs (leave out for All) |
+| `sportId` | The sport chips |
+| `region` | A province or `National` |
+| `q` | Part of the name, any case |
+| `following=true` | Only competitions the signed-in person follows (`401` without a token) |
 
 ```json
-{ "competitions": [{ "id": 1, "name": "Gauteng Schools Basketball League", "season": "2026",
-                     "sport": { "id": 2, "name": "Basketball" } }] }
+{
+  "counts": { "all": 7, "ongoing": 6, "upcoming": 0, "completed": 1 },
+  "competitions": [{
+    "id": 3, "name": "Schools League 2026 - Football", "season": "2026",
+    "sport": { "id": 4, "name": "Football" },
+    "status": "ongoing", "region": "National", "ageGroup": "Open",
+    "startDate": "2026-09-14", "endDate": "2026-11-28",
+    "teams": 7, "roundsPlayed": 4, "totalRounds": 6,
+    "leader": { "name": "Oakridge High", "points": 9, "decidedBy": "table",
+                "team": { "id": 12, "name": "Oakridge Football", "level": "1st_team", "genderCategory": "boys", "ageGroup": "Open" },
+                "school": { "id": 5, "name": "Oakridge High", "province": "Western Cape", "town": "Stellenbosch" } },
+    "following": false
+  }]
+}
 ```
+
+- `counts` uses every filter except `status`, so each tab can show its number.
+- Order: ongoing (earliest start first), upcoming (soonest first), completed (latest end first).
+- `status`:
+  - `completed` once every fixture is played and any end date the organiser set has passed.
+  - `ongoing` once a match is played or live, or the start date has come.
+  - `upcoming` before that.
+  - Cancelled fixtures are ignored.
+- `region`, `ageGroup`, `startDate`/`endDate` and `totalRounds` use what the organiser set. Otherwise they are worked out from the fixtures:
+  - Region: the schools' province, or `National` when they come from more than one.
+  - Age group: the teams' age group, when they all share one (`null` if mixed).
+  - Dates: the first and last match day.
+  - Rounds: the most fixtures any one team has.
+- `roundsPlayed` follows the share of fixtures played ("Round 4 of 6" and the progress bar). It never reaches the last round while matches are still to come.
+- `leader` is `null` until there is a result, and always `null` for upcoming competitions.
+  - Ongoing competitions show the table leader ("LEADER").
+  - Completed ones show the champion ("CHAMPION"): the winner of a decided `championship` fixture (`decidedBy: "final"`, `points: null`), otherwise the top of the table.
+  - `name` is the school name, or the team name for a team with no school.
+
+### GET /api/competitions/:id
+
+One card, same shape: `{ "competition": {...} }`. `404 NOT_FOUND` if it doesn't exist.
+
+### PUT /api/competitions/:id/follow and DELETE /api/competitions/:id/follow (signed in)
+
+Follow a competition to turn its alerts on, or unfollow to turn them off. Both are safe to repeat.
+Response: `{ "competitionId": 3, "following": true }`.
 
 ### POST /api/competitions (coach or admin)
 
-Body: `{ "name": "...", "sportId": 2, "season": "2026" }` (only `name` required).
+Body: `{ "name": "...", "sportId": 2, "season": "2026" }` (only `name` required), plus the optional card
+details `region` (a province or `National`), `ageGroup` (`U/14`, `U/16`, `U/19`, `Open`), `startDate`,
+`endDate` (YYYY-MM-DD) and `rounds` (1 to 500). Response `201`: `{ "competition": {...} }`, the full card.
 `409 COMPETITION_EXISTS` if the name already exists (any case).
+
+### PATCH /api/competitions/:id (the coach who created it, or admin)
+
+Same fields as POST; send only those to change. Send `null` to clear a detail so it is worked out from
+the fixtures again. `403 FORBIDDEN` for someone else's competition; `400 INVALID_DATES` if the end date
+would fall before the start date.
 
 ### Fixture object
 
@@ -355,6 +430,7 @@ Body: `{ "name": "...", "sportId": 2, "season": "2026" }` (only `name` required)
 | `when=past` | Played: status finished. Newest first |
 | `teamId` | Fixtures where the team is home or away |
 | `mine=true` | Fixtures for teams I coach (empty for learners for now) |
+| `favorites=true` | My feed: matches with one of my favourite teams or in one of my favourite sports. With no favourites picked, every match (the screen's "With none picked, your feed shows every sport") |
 | `sportId`, `competitionId`, `status` | Exact filters |
 | `from`, `to` | ISO date-times that bound `matchDate` |
 | `order=asc` or `order=desc` | Overrides the default order |
@@ -466,6 +542,173 @@ Error `FIXTURE_NOT_FINISHED` if the result has not been recorded yet.
 
 Response `200`: `{ "report": {...} }` (same shape). `404 REPORT_NOT_FOUND` if none has been filed.
 
+## Results screen
+
+Public, no login needed. Everything the learner **Results** tab shows, so the app does not have to group,
+count or rank anything itself. Days, `today` and the period tabs use **South African time**: a match at
+00:30 on Saturday in Johannesburg is a Saturday result even though it was still Friday in UTC.
+
+### GET /api/results
+
+| Filter | Meaning |
+|---|---|
+| `q` | Search team name, school name or venue (any case, up to 100 characters) |
+| `sportId` | One sport (the chips) |
+| `province` | One of the 9 provinces (the filter sheet's region). A match counts when either school is there |
+| `period` | `all` (default), `today`, `yesterday`, `week` (since Monday) or `month` (the tabs) |
+| `from`, `to` | `YYYY-MM-DD`, both included (the filter sheet's date range) |
+| `limit` | Days per page, default 3, max 31 (the screen shows 3 days, then "Load more results") |
+| `offset` | Days to skip: send `offset + limit` for the next page |
+
+Only finished matches with a score are results. Response:
+
+```json
+{
+  "today": "2026-11-09",
+  "summary": { "matchesPlayed": 43, "homeWins": 23, "awayWins": 16, "draws": 4, "totalScored": 2942 },
+  "days": [
+    { "date": "2026-11-05", "isToday": false, "count": 2,
+      "results": [ { "...": "a fixture object", "category": "Rugby 1st Team" } ] }
+  ],
+  "limit": 3, "offset": 0, "totalDays": 18, "hasMore": true
+}
+```
+
+- `summary` feeds the Results Summary card and covers **every** matching result, not just this page.
+  `totalScored` is the "Points & goals scored" tile.
+- `days` are newest first and feed the day cards (`count` is the "2 RESULTS" label). Results in a day are newest first.
+- Each result is the normal fixture object (see Fixture object) plus `category`, the card label:
+  "Football U/19", "Girls Netball 1st Team". Girls' teams are prefixed; levels read `U/16`, `1st Team`, `2nd Team`.
+- Show schools as `homeTeam.school.name` and `awayTeam.school.name`. `venue` may be `null`.
+- `hasMore` says whether to show "Load more results". `matchesPlayed: 0` with empty `days` means nothing matches.
+
+### GET /api/results/filters
+
+The options for the sport chips and the filter sheet: only sports and provinces that have results.
+
+```json
+{ "sports": [{ "id": 4, "name": "Football" }], "provinces": ["Gauteng", "Western Cape"],
+  "periods": ["all", "today", "yesterday", "week", "month"] }
+```
+
+### GET /api/results/standings
+
+The Top Standings card: a table of **schools** from every finished result. Filters: `sportId`, `province`, and
+`limit` (1 to 100; leave it out for the full table). Use `limit=5` for the card and no limit for "Full standings".
+
+```json
+{
+  "sport": null, "province": null, "totalSchools": 8,
+  "standings": [
+    { "position": 1, "school": { "id": 2, "name": "Riverside College", "province": "Gauteng", "town": "Pretoria" },
+      "played": 19, "won": 11, "drawn": 2, "lost": 6, "pointsFor": 640, "pointsAgainst": 590,
+      "difference": 50, "points": 35, "winRate": 57.9, "averageScored": 33.7, "averageConceded": 31.1,
+      "form": ["W", "W", "L", "D", "L"] }
+  ]
+}
+```
+
+- Same rules as league tables: win 3, draw 1, loss 0; ordered by points, then difference, then points for.
+  Schools level on all of those share a `position`. `form` is the last five results, oldest first.
+- A school's teams count together. Matches between two teams of the same school are left out.
+- With `province`, only that province's schools are listed and numbered from 1, but all their matches count,
+  including those against schools elsewhere.
+- For one competition's league table, use `GET /api/competitions/:id/standings` instead.
+
+## Rankings screen
+
+Public endpoints for the learner app's Rankings screen. Rankings cover one **season** (a calendar year in
+South African time, the current one by default) and are worked out from its finished results each time.
+
+### How points are earned
+
+Every finished match is worth up to 100 points to each team, split like the screen's "Ranking breakdown" card:
+
+| Part | Max | How |
+|---|---|---|
+| Match Wins | 40 | Win 40, draw 20, loss 0 |
+| Strength of Opposition | 25 | 25 × the opponent's season record (wins plus half the draws, over matches played) |
+| Goals Scored | 20 | 20 × the team's share of the match score (0–0 gives each side 10) |
+| Consistency | 10 | 10 when unbeaten in this match **and** the team's previous one |
+| Participation | 5 | 5 for every match played |
+
+- **Teams**: the sum over their matches, so playing and winning more both count.
+- **Schools**: the sum of their teams.
+- **Regions** (provinces): the **average** of their schools, so a big province doesn't win just by being big.
+- **Athletes**: their team's match points for every match they were in the lineup for; bench players get half.
+  There are no individual stats (goals, tries) yet, so lineups are the only measure. Athletes appear only once
+  coaches submit lineups.
+
+Every row has `breakdown` with the points from each part (rounded, so it may be 1 off `points`).
+
+### GET /api/rankings
+
+| Parameter | Meaning |
+|---|---|
+| `type` | `schools` (default), `teams`, `athletes` or `regions`: the tabs |
+| `sportId` | Only matches in this sport count (the sport chips) |
+| `ageGroup` | `U/14`, `U/16`, `U/19` or `Open` (send as `U%2F14`). Only teams in that group count. Levels map as: u13–u14 → U/14, u15–u16 → U/16, u17–u19 → U/19, anything else (`1st_team`, `2nd_team`, none) → Open |
+| `province` | Only entries in this province are listed, numbered from 1 (the region filter and "View top 10" on a region card) |
+| `season` | Year, default the current one |
+| `limit`, `offset` | Paging, default 10 rows ("View full rankings": `limit=100`, or page with `offset`) |
+
+```json
+{
+  "type": "schools", "season": 2026, "updatedAt": "2026-11-09T17:15:24.331Z",
+  "filters": { "sport": null, "ageGroup": null, "province": null },
+  "total": 8, "limit": 10, "offset": 0, "hasMore": false,
+  "rankings": [
+    { "position": 1, "previousPosition": 3, "trend": 2,
+      "name": "Riverside College", "detail": "4 sports played", "province": "Gauteng", "points": 1074,
+      "played": 19, "won": 11, "drawn": 2, "lost": 6,
+      "breakdown": { "wins": 480, "opposition": 209, "scoring": 209, "consistency": 80, "participation": 95 },
+      "school": { "id": 2, "name": "Riverside College", "province": "Gauteng", "town": "Pretoria" },
+      "sportsPlayed": 4, "teamsRanked": 4 }
+  ]
+}
+```
+
+- `name`, `detail` and `province` are the row's two lines: the school name; for a team, its school name and a
+  label like `"Rugby 1st Team"` or `"Girls Netball U/16"`; for an athlete, their name and `"School · Sport"`;
+  for a region, the province and `"3 schools"`.
+- Each type adds its own references: `school` and `sportsPlayed`/`teamsRanked` (schools); `team` (with
+  `ageGroup`), `school`, `sport` (teams); `athlete` (`id`, `name`), `team`, `school`, `sport` (athletes);
+  `schoolsRanked` (regions).
+- `trend` is places moved since the ranking 7 days ago: positive is up, negative down, `0` unchanged.
+  `previousPosition` and `trend` are `null` for an entry that wasn't ranked then (show it as new).
+- Entries on equal points share a `position`. `updatedAt` is when the latest result was recorded (for
+  "Updated 9 Nov 2026"), `null` if the season has none.
+
+### GET /api/rankings/overview
+
+The cards under the table, for the whole season (no filters except `season`):
+
+```json
+{
+  "season": 2026, "updatedAt": "2026-11-09T17:15:24.331Z",
+  "breakdown": [{ "key": "wins", "label": "Match Wins", "weight": 0.4, "description": "A win earns 40 points and a draw 20." }],
+  "topSports": [{ "sport": { "id": 7, "name": "Rugby" }, "label": "Rugby 1st Team", "team": {}, "school": {}, "points": 302 }],
+  "topRisers": [{ "position": 4, "name": "Lakeside Collegiate", "trend": 2 }],
+  "regionLeaders": [{ "province": "Gauteng", "leader": { "position": 1, "name": "Riverside College", "points": 1074 } }]
+}
+```
+
+- `breakdown`: the "Ranking breakdown" card (weights add up to 1).
+- `topSports`: each sport's best team, best first, top 5 ("Top performing sports").
+- `topRisers`: schools that climbed this week, biggest climb first, top 5 ("Top rise this season").
+- `regionLeaders`: the top school in each province that has one ("Top schools by region"). Rows in
+  `topRisers` and `leader` have the same shape as a schools ranking row (shortened above).
+
+### GET /api/rankings/filters
+
+```json
+{ "season": 2026, "seasons": [2026], "types": ["schools", "teams", "athletes", "regions"],
+  "sports": [{ "id": 4, "name": "Football" }], "ageGroups": ["U/14", "U/16", "U/19", "Open"],
+  "provinces": ["Gauteng", "Western Cape"] }
+```
+
+`sports` and `provinces` only list those with results in the season; `seasons` lists every year with results.
+
 ## Team rosters
 
 All need `Authorization: Bearer <accessToken>`. A learner joins a team in one of two ways: they **ask to join**
@@ -548,6 +791,54 @@ Removes a player, or rejects a join request.
 
 Every team now includes `"playerCount"`: the number of active players. It is visible to everyone and feeds the
 coach home "Total players" card.
+
+## Favourites
+
+A signed-in person's favourite sports and teams. They shape the feed (`GET /api/fixtures?favorites=true`).
+Followed competitions (`PUT /api/competitions/:id/follow`) come back here too.
+
+### GET /api/sports/categories (public)
+
+The Favourite Sports screen's tiles, grouped and in screen order:
+
+```json
+{ "categories": [
+  { "key": "team", "label": "Team Sports", "sports": [
+    { "id": 4, "name": "Football", "key": "football", "category": "team" },
+    { "id": 23, "name": "Water Polo", "key": "waterPolo", "category": "team" } ] },
+  { "key": "other", "label": "Other", "sports": [{ "id": 50, "name": "Kabaddi", "key": null, "category": "other" }] }
+] }
+```
+
+- `key` is the id the app already saves (`football`, `waterPolo`, `indigenousGames`).
+- Groups: `team`, `athletics`, `racket`, `water`, `combat`, `precision`, `mind`. Sports typed in at signup land in `other`, with `key: null`.
+- `GET /api/sports` (A to Z) now includes `key` and `category` too.
+
+### GET /api/me/favorites
+
+```json
+{ "sports": [{ "id": 6, "name": "Netball", "key": "netball", "category": "team" }],
+  "teams": [{ "id": 4, "name": "Basketball Boys", "favorite": true }],
+  "competitions": [{ "id": 3, "name": "Schools League 2026 - Football", "sport": { "id": 4, "name": "Football" } }] }
+```
+
+`teams` are full team objects (shortened above). Sports come in screen order; teams and competitions A to Z.
+
+### PUT /api/me/favorites/sports/:sport and DELETE /api/me/favorites/sports/:sport
+
+Pick or unpick one tile. `:sport` is the sport's `id` or its app `key` (any case).
+Response: `{ "sport": {...}, "favorite": true }`. Both are safe to repeat. `404 NOT_FOUND` for an unknown sport.
+
+### PUT /api/me/favorites/sports
+
+Replace the whole list in one go: `{ "sports": ["football", "waterPolo", 7] }` (ids or keys).
+An empty list clears it. `400 UNKNOWN_SPORT` (with `details.sports`) if any is unknown; nothing changes then.
+Response: the same as `GET /api/me/favorites`.
+
+### PUT /api/me/favorites/teams/:teamId and DELETE /api/me/favorites/teams/:teamId
+
+Favourite or unfavourite a team. Response: `{ "teamId": 4, "favorite": true }`. Both are safe to repeat.
+`404 NOT_FOUND` for an unknown team. List them with `GET /api/teams?favorites=true` or `GET /api/me/favorites`.
 
 ## Match lineups
 

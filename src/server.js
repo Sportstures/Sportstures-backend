@@ -30,7 +30,10 @@ app.use('/api/competitions', require('./routes/competitions'));
 app.use('/api/teams', require('./routes/teams'));
 app.use('/api/fixtures', require('./routes/fixtures'));
 app.use('/api/fixtures', require('./routes/lineups'));
+app.use('/api/results', require('./routes/results'));
+app.use('/api/rankings', require('./routes/rankings'));
 app.use('/api/teams', require('./routes/roster'));
+app.use('/api/me/favorites', require('./routes/favorites'));
 app.use('/api/me', require('./routes/me'));
 app.use('/api/coach', require('./routes/coach'));
 

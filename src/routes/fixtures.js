@@ -33,6 +33,7 @@ async function checkReferences({ competitionId }) {
 
 // GET /api/fixtures
 //   teamId, sportId, competitionId, status, from, to (ISO dates), mine=true (teams I coach),
+//   favorites=true (my favourite teams and sports),
 //   when=upcoming|past, order=asc|desc, limit, offset
 // Public: no login needed (mine=true does need one).
 router.get(
@@ -47,6 +48,7 @@ router.get(
     query('from').optional().isISO8601(),
     query('to').optional().isISO8601(),
     query('mine').optional().isBoolean().toBoolean(),
+    query('favorites').optional().isBoolean().withMessage('favorites must be true or false').toBoolean(),
     query('order').optional().isIn(['asc', 'desc']),
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
     query('offset').optional().isInt({ min: 0 }).toInt(),
@@ -54,8 +56,8 @@ router.get(
   validate,
   async (req, res, next) => {
     try {
-      const { teamId, sportId, competitionId, status, when, from, to, mine } = req.query;
-      if (mine && !requireUser(req, res)) return;
+      const { teamId, sportId, competitionId, status, when, from, to, mine, favorites } = req.query;
+      if ((mine || favorites) && !requireUser(req, res)) return;
       const limit = req.query.limit || 50;
       const offset = req.query.offset || 0;
       const where = [];
@@ -69,6 +71,15 @@ router.get(
       if (from) add('f.match_date >= ?', from);
       if (to) add('f.match_date <= ?', to);
       if (mine) add('(hcu.id = ? OR acu.id = ?)', req.user.id);
+      // My feed: matches with a favourite team or in a favourite sport. With no favourites, everything.
+      if (favorites) {
+        add(`((NOT EXISTS (SELECT 1 FROM user_favorite_teams WHERE user_id = ?)
+                AND NOT EXISTS (SELECT 1 FROM user_favorite_sports WHERE user_id = ?))
+              OR f.home_team_id IN (SELECT team_id FROM user_favorite_teams WHERE user_id = ?)
+              OR f.away_team_id IN (SELECT team_id FROM user_favorite_teams WHERE user_id = ?)
+              OR hmt.sport_id IN (SELECT sport_id FROM user_favorite_sports WHERE user_id = ?)
+              OR amt.sport_id IN (SELECT sport_id FROM user_favorite_sports WHERE user_id = ?))`, req.user.id);
+      }
       // upcoming = still to be played; past = played (has a final score)
       if (when === 'upcoming') where.push("f.status IN ('scheduled', 'live', 'postponed')");
       if (when === 'past') where.push("f.status = 'finished'");

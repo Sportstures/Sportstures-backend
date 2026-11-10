@@ -32,7 +32,18 @@ const teamFields = [
   body('foundedYear').optional({ values: 'null' }).isInt({ min: 1800, max: 2100 }).toInt(),
 ];
 
-// GET /api/teams?sportId=&schoolId=&q=&mine=true&limit=&offset=
+// Adds favorite: true/false to each team for a signed-in person (false for anonymous visitors).
+async function withFavorites(teams, user) {
+  if (!user || !teams.length) return teams.map((t) => ({ ...t, favorite: false }));
+  const { rows } = await pool.query(
+    'SELECT team_id FROM user_favorite_teams WHERE user_id = $1 AND team_id = ANY($2)',
+    [user.id, teams.map((t) => t.id)]
+  );
+  const favourite = new Set(rows.map((r) => r.team_id));
+  return teams.map((t) => ({ ...t, favorite: favourite.has(t.id) }));
+}
+
+// GET /api/teams?sportId=&schoolId=&q=&mine=true&favorites=true|false&limit=&offset=
 router.get(
   '/',
   optionalAuthenticate,
@@ -40,6 +51,7 @@ router.get(
     query('sportId').optional().isInt({ min: 1 }).toInt(),
     query('schoolId').optional().isInt({ min: 1 }).toInt(),
     query('mine').optional().isBoolean().toBoolean(),
+    query('favorites').optional().isBoolean().withMessage('favorites must be true or false').toBoolean(),
     query('q').optional().isString().trim().isLength({ max: 100 }),
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
     query('offset').optional().isInt({ min: 0 }).toInt(),
@@ -47,18 +59,23 @@ router.get(
   validate,
   async (req, res, next) => {
     try {
-      const { sportId, schoolId, mine, q } = req.query;
-      if (mine && !requireUser(req, res)) return;
+      const { sportId, schoolId, mine, favorites, q } = req.query;
+      if ((mine || favorites !== undefined) && !requireUser(req, res)) return;
       const limit = req.query.limit || 50;
       const offset = req.query.offset || 0;
       const where = [];
       const params = [];
-      const add = (sql, value) => { params.push(value); where.push(sql.replace('?', `$${params.length}`)); };
+      const add = (sql, value) => { params.push(value); where.push(sql.replace(/\?/g, `$${params.length}`)); };
 
       if (sportId) add('t.sport_id = ?', sportId);
       if (schoolId) add('t.school_id = ?', schoolId);
-      if (q) add('t.name ILIKE ?', `%${q}%`);
+      // The team or its school ("Search teams" finds "Northview High"). % and _ are plain text.
+      if (q) add('(t.name ILIKE ? OR t_sc.name ILIKE ?)', `%${q.replace(/[\\%_]/g, '\\$&')}%`);
       if (mine) add('cu.id = ?', req.user.id); // teams coached by the logged-in user
+      // favorites=true: only my favourites; favorites=false: everything else (the "Add teams" list).
+      if (favorites !== undefined) {
+        add(`t.id ${favorites ? '' : 'NOT '}IN (SELECT team_id FROM user_favorite_teams WHERE user_id = ?)`, req.user.id);
+      }
 
       params.push(limit, offset);
       const { rows } = await pool.query(
@@ -66,7 +83,7 @@ router.get(
          ORDER BY t.name LIMIT $${params.length - 1} OFFSET $${params.length}`,
         params
       );
-      res.json({ teams: rows.map(mapFullTeam), limit, offset });
+      res.json({ teams: await withFavorites(rows.map(mapFullTeam), req.user), limit, offset });
     } catch (err) {
       next(err);
     }
@@ -77,7 +94,7 @@ router.get('/:id', optionalAuthenticate, [idParam], validate, async (req, res, n
   try {
     const team = await loadTeam(req.params.id);
     if (!team) return res.status(404).json(errorBody('NOT_FOUND', 'Team not found'));
-    res.json({ team: mapFullTeam(team) });
+    res.json({ team: (await withFavorites([mapFullTeam(team)], req.user))[0] });
   } catch (err) {
     next(err);
   }

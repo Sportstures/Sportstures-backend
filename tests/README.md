@@ -19,6 +19,10 @@ the verification codes directly.
 | `auth.test.js` | Learner and coach signup, email verification, login, refresh tokens, logout, validation, permissions |
 | `teams-fixtures.test.js` | Teams, competitions, fixtures: permissions, filters, time zones, database constraints |
 | `results.test.js`, `standings.test.js` | Recording results, league tables, team records, match reports |
+| `results-page.test.js` | The Results screen: day groups in South African time, summary, filters, paging, school standings |
+| `rankings.test.js`, `rankings-page.test.js` | Ranking points maths; the Rankings screen: schools, teams, athletes, regions, trends, filters, overview |
+| `competitions.test.js`, `competitions-page.test.js` | Competition cards: status, region, age group, rounds, leader or champion; tabs, following, editing |
+| `favorites.test.js` | Sports catalogue and categories, favourite sports and teams, the favourites feed |
 | `roster.test.js` | Joining teams, approvals, jersey numbers, roster privacy |
 | `lineups.test.js` | Submitting lineups, roster checks, lineup privacy, locking |
 | `public-reads.test.js` | Which routes need no login, and which stay private |
