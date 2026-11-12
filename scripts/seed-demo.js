@@ -74,8 +74,48 @@ async function sportId(db, name) {
   return (await db.query('INSERT INTO sports (name) VALUES ($1) RETURNING id', [name])).rows[0].id;
 }
 
+// The seed needs every table the app has. Say exactly which migration is missing instead of failing halfway.
+const REQUIRED_TABLES = [
+  ['fixture_reports', '006_match_reports.sql'],
+  ['team_members', '007_team_members.sql'],
+  ['fixture_lineups', '008_match_lineups.sql'],
+];
+
+async function checkMigrations(db) {
+  const missing = [];
+  for (const [table, file] of REQUIRED_TABLES) {
+    const found = await db.query('SELECT to_regclass($1) AS t', [`public.${table}`]);
+    if (!found.rows[0].t) missing.push(file);
+  }
+  const province = await db.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'schools' AND column_name = 'province'");
+  if (!province.rows[0]) missing.push('009_school_location.sql');
+  if (missing.length) {
+    const err = new Error(`Your database is missing migrations. Run these in pgAdmin (in order), then try again: ${missing.join(', ')}`);
+    err.migrations = true;
+    throw err;
+  }
+}
+
 // `db` is a pg Pool or Client. Returns a summary, or { skipped: true } if demo data already exists.
-async function seedDemo(db, { reset = false, now = new Date() } = {}) {
+// All or nothing: if anything fails, nothing is left behind (including a --reset).
+async function seedDemo(db, options = {}) {
+  await checkMigrations(db);
+  if (typeof db.totalCount !== 'number') return seedInside(db, options); // already a single connection
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await seedInside(client, options);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function seedInside(db, { reset = false, now = new Date() } = {}) {
   if (reset) await removeDemoData(db);
   const existing = await db.query('SELECT 1 FROM users WHERE email LIKE $1 LIMIT 1', [`%@${DEMO_DOMAIN}`]);
   if (existing.rows[0]) return { skipped: true };
@@ -216,8 +256,9 @@ if (require.main === module) {
       console.log(`Log in as coach1@${DEMO_DOMAIN} or learner@${DEMO_DOMAIN}, password ${result.password}`);
     }
     await pool.end();
-  })().catch((err) => {
-    console.error(err);
+  })().catch(async (err) => {
+    console.error(err.migrations ? err.message : err);
+    await pool.end().catch(() => {});
     process.exit(1);
   });
 }
