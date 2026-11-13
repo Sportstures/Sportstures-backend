@@ -22,6 +22,7 @@ the verification codes directly.
 | `results-page.test.js` | The Results screen: day groups in South African time, summary, filters, paging, school standings |
 | `rankings.test.js`, `rankings-page.test.js` | Ranking points maths; the Rankings screen: schools, teams, athletes, regions, trends, filters, overview |
 | `competitions.test.js`, `competitions-page.test.js` | Competition cards: status, region, age group, rounds, leader or champion; tabs, following, editing |
+| `find-schools.test.js` | The Find Schools search, filter chips, school records, my school and the school page |
 | `favorites.test.js` | Sports catalogue and categories, favourite sports and teams, the favourites feed |
 | `roster.test.js` | Joining teams, approvals, jersey numbers, roster privacy |
 | `lineups.test.js` | Submitting lineups, roster checks, lineup privacy, locking |

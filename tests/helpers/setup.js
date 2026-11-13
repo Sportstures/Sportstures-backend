@@ -18,6 +18,9 @@ process.env.AUTH_RATE_LIMIT_MAX = '10000';
 process.env.OTP_RATE_LIMIT_MAX = '10000';
 delete process.env.SMTP_HOST;
 delete process.env.SMTP_FROM;
+// Tests always use the local throwaway database below, never a DATABASE_URL (such as Render's).
+delete process.env.DATABASE_URL;
+delete process.env.DB_SSL;
 
 const { Client, Pool } = require('pg');
 

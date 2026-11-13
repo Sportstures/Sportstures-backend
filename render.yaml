@@ -1,0 +1,46 @@
+# Render Blueprint for the Sportstures API (https://render.com/docs/blueprint-spec).
+# In the Render dashboard: New -> Blueprint -> pick this repository. Render reads this file from
+# the branch you choose (main) and asks for every value marked `sync: false` on the first setup.
+#
+# The database is NOT created here: it already exists (created by hand in the dashboard), so this
+# file only connects to it. Paste its INTERNAL Database URL when asked for DATABASE_URL.
+services:
+  - type: web
+    name: sportstures-api
+    runtime: node
+    region: oregon            # must match the database's region for the Internal Database URL to work
+    plan: free                # free services sleep after 15 minutes idle; pick starter or higher for launch
+    branch: main
+    buildCommand: npm ci --omit=dev
+    # Applies any new migrations, then starts the server. Safe on every deploy (see scripts/migrate.js).
+    startCommand: npm run db:migrate && npm start
+    healthCheckPath: /health
+    autoDeploy: true          # redeploys when main changes
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATABASE_URL     # the database's Internal Database URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true   # Render creates a long random secret once
+      - key: JWT_ACCESS_EXPIRES_IN
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES_DAYS
+        value: "30"
+      - key: AUTH_RATE_LIMIT_MAX
+        value: "20"
+      # Email (Afrihost SMTP). Without these, signup codes cannot be sent in production.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false

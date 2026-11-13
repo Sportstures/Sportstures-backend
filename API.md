@@ -245,16 +245,51 @@ Response `200`: `{ "user": { ... } }` (same user object as register, including `
 Schools are created automatically from signup (by name, ignoring case). Provinces are exactly:
 Eastern Cape, Free State, Gauteng, KwaZulu-Natal, Limpopo, Mpumalanga, North West, Northern Cape, Western Cape.
 
-School object: `{ "id": 1, "name": "Northview High", "province": "Gauteng", "town": "Sandton", "teamCount": 4, "sports": ["Basketball", "Football"] }`.
+School object:
+
+```json
+{ "id": 1, "name": "Northview High", "province": "Gauteng", "town": "Sandton", "teamCount": 4,
+  "sports": ["Basketball", "Football"],
+  "record": { "played": 12, "won": 7, "drawn": 2, "lost": 3, "winRate": 58 },
+  "mySchool": false }
+```
+
+`record` counts finished matches of all the school's teams against other schools (a match between two teams
+of the same school is left out). `winRate` is a whole percentage, or `null` before any match.
+`mySchool` is `true` for the signed-in learner's or coach's own school (always `false` when not signed in).
 `province` and `town` are `null` when unknown.
 
 ### GET /api/schools (public)
 
-Filters: `province`, `q` (name search), `limit` (max 100), `offset`. Response: `{ "schools": [...], "limit", "offset" }`.
+The learner Find Schools screen. Send the token to get `mySchool`.
+
+| Query | Meaning |
+|---|---|
+| `q` | Search the school's name or town (`%` and `_` are plain text) |
+| `province` | One of the 9 provinces |
+| `sportId` | Schools with at least one team in that sport |
+| `mine=true` | Only my own school (needs a login, else `401`) |
+| `limit` (max 100, default 50), `offset` | Paging |
+
+Response: `{ "schools": [...], "total": 23, "limit": 50, "offset": 0, "hasMore": false }`, sorted by name.
+
+### GET /api/schools/filters (public)
+
+The filter chips, with how many schools each matches:
+`{ "provinces": [{ "name": "Gauteng", "schoolCount": 8 }, ...all 9], "sports": [{ "id": 3, "name": "Netball", "schoolCount": 5 }] }`.
+Only sports that some school has a team in are listed.
 
 ### GET /api/schools/:id (public)
 
-Response: `{ "school": {...} }`, or `404`.
+The school page. Response, or `404`:
+
+```json
+{ "school": {...}, "teams": [team, ...], "recentResults": [fixture, ...], "upcoming": [fixture, ...] }
+```
+
+`teams` are full team objects (sorted by sport, then name) with `favorite` for the signed-in learner.
+`recentResults` is the last 5 finished matches, newest first; `upcoming` the next 5 still to play, soonest first.
+For more, use `GET /api/fixtures?schoolId=`.
 
 ### PATCH /api/schools/:id (admin, or a coach with a team at the school)
 
@@ -429,6 +464,7 @@ would fall before the start date.
 | `when=upcoming` | Not played yet: status scheduled, live or postponed. Soonest first |
 | `when=past` | Played: status finished. Newest first |
 | `teamId` | Fixtures where the team is home or away |
+| `schoolId` | Fixtures where any team of the school is home or away |
 | `mine=true` | Fixtures for teams I coach (empty for learners for now) |
 | `favorites=true` | My feed: matches with one of my favourite teams or in one of my favourite sports. With no favourites picked, every match (the screen's "With none picked, your feed shows every sport") |
 | `sportId`, `competitionId`, `status` | Exact filters |

@@ -6,6 +6,7 @@ const { authenticate, optionalAuthenticate, requireUser, requireRole } = require
 const { errorBody, FULL_TEAM_SELECT: TEAM_SELECT, mapFullTeam } = require('../utils/serializers');
 const { findOrCreateSchool } = require('../utils/schools');
 const { teamRecord } = require('../utils/standings');
+const { withFavorites } = require('../utils/favorites');
 
 const router = express.Router();
 
@@ -31,17 +32,6 @@ const teamFields = [
   body('location').optional({ values: 'falsy' }).isString().trim().isLength({ max: 255 }),
   body('foundedYear').optional({ values: 'null' }).isInt({ min: 1800, max: 2100 }).toInt(),
 ];
-
-// Adds favorite: true/false to each team for a signed-in person (false for anonymous visitors).
-async function withFavorites(teams, user) {
-  if (!user || !teams.length) return teams.map((t) => ({ ...t, favorite: false }));
-  const { rows } = await pool.query(
-    'SELECT team_id FROM user_favorite_teams WHERE user_id = $1 AND team_id = ANY($2)',
-    [user.id, teams.map((t) => t.id)]
-  );
-  const favourite = new Set(rows.map((r) => r.team_id));
-  return teams.map((t) => ({ ...t, favorite: favourite.has(t.id) }));
-}
 
 // GET /api/teams?sportId=&schoolId=&q=&mine=true&favorites=true|false&limit=&offset=
 router.get(
