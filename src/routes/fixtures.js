@@ -42,6 +42,7 @@ router.get(
   [
     query('teamId').optional().isInt({ min: 1 }).toInt(),
     query('sportId').optional().isInt({ min: 1 }).toInt(),
+    query('schoolId').optional().isInt({ min: 1 }).toInt(),
     query('competitionId').optional().isInt({ min: 1 }).toInt(),
     query('status').optional().isIn(['scheduled', 'live', 'finished', 'cancelled', 'postponed']),
     query('when').optional().isIn(['upcoming', 'past']),
@@ -56,7 +57,7 @@ router.get(
   validate,
   async (req, res, next) => {
     try {
-      const { teamId, sportId, competitionId, status, when, from, to, mine, favorites } = req.query;
+      const { teamId, sportId, schoolId, competitionId, status, when, from, to, mine, favorites } = req.query;
       if ((mine || favorites) && !requireUser(req, res)) return;
       const limit = req.query.limit || 50;
       const offset = req.query.offset || 0;
@@ -66,6 +67,7 @@ router.get(
 
       if (teamId) add('(f.home_team_id = ? OR f.away_team_id = ?)', teamId);
       if (sportId) add('(hmt.sport_id = ? OR amt.sport_id = ?)', sportId);
+      if (schoolId) add('(hmt.school_id = ? OR amt.school_id = ?)', schoolId);
       if (competitionId) add('f.competition_id = ?', competitionId);
       if (status) add('f.status = ?', status);
       if (from) add('f.match_date >= ?', from);
