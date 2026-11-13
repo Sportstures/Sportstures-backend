@@ -6,6 +6,13 @@ const { contactEmail } = require('./utils/contacts');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Behind a host's proxy (Render and most others), set TRUST_PROXY=1 so req.ip is the visitor's
+// address, not the proxy's. Without it the login rate limits would count everyone as one visitor.
+if (process.env.TRUST_PROXY) {
+  const hops = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isInteger(hops) ? hops : process.env.TRUST_PROXY);
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
