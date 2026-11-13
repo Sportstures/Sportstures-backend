@@ -230,7 +230,9 @@ about 70 fixtures: roughly 60% already played with scores, the rest coming up in
 Log in as `coach1@demo.sportstures.test` or `learner@demo.sportstures.test` with the password
 `DemoPass1`. Everything it creates belongs to `@demo.sportstures.test` accounts, so `--reset`
 removes only that and never touches real users or matches. It refuses to run when `NODE_ENV=production`.
-It adds data to whichever database `DATABASE_URL` (or else `DB_NAME`) points at, so check that first.
+Run all the migrations first. The script checks, and if one is missing it tells you which file to run
+and changes nothing. It is all-or-nothing, so a failure never leaves half the demo data behind.
+It adds data to whichever database `DB_NAME` points at, so check that first.
 
 ## Useful commands
 
