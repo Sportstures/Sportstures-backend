@@ -62,6 +62,8 @@ async function startTestApp() {
 
   // Capture verification codes instead of sending email.
   const sentEmails = [];
+  const sentInvites = [];
+  const control = { failInvites: false };
   const emailModule = require.resolve(path.join(root, 'src/utils/email.js'));
   require.cache[emailModule] = {
     id: emailModule,
@@ -70,6 +72,10 @@ async function startTestApp() {
     exports: {
       sendEmail: async () => {},
       sendVerificationCode: async (to, otp) => { sentEmails.push({ to, otp }); },
+      sendCoachInvitation: async (to, details) => {
+        if (control.failInvites) throw new Error('smtp down');
+        sentInvites.push({ to, ...details });
+      },
     },
   };
 
@@ -132,7 +138,7 @@ async function startTestApp() {
     await admin.end();
   }
 
-  return { api, origin, pool: setupPool, lastCode, sentEmails, uploads, deleted, stop };
+  return { api, pool: setupPool, lastCode, sentEmails, sentInvites, control, stop };
 }
 
 // Test data builders matching the mobile signup screens.
