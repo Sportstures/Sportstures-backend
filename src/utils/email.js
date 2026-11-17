@@ -3,6 +3,7 @@ const { contactEmail } = require('./contacts');
 const { crestAttachment } = require('../emails/layout');
 const { verificationCodeEmail } = require('../emails/verificationCode');
 const { accountNoticeEmail } = require('../emails/accountNotice');
+const { supportMessageEmail, supportReceiptEmail } = require('../emails/supportMessage');
 const { coachInvitationEmail } = require('../emails/coachInvitation');
 
 function createTransport() {
@@ -43,8 +44,14 @@ function shouldPrintInsteadOfSending() {
   return !smtpConfigured && ['development', 'test'].includes(process.env.NODE_ENV);
 }
 
-// Sends a branded email from no-reply. Replies go to the support mailbox instead.
-async function sendEmail({ to, subject, text, html }) {
+// True when emails can go out: SMTP is set up, or (in development/test) they are printed instead.
+function canSendEmail() {
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_FROM) || shouldPrintInsteadOfSending();
+}
+
+// Sends a branded email from no-reply. Replies go to the support mailbox unless `replyTo` is given
+// (an address, or { name, address }).
+async function sendEmail({ to, subject, text, html, replyTo }) {
   if (shouldPrintInsteadOfSending()) {
     console.log(`\n[dev email] SMTP is not configured, so this email was not sent.\n  To: ${to}\n  Subject: ${subject}\n`);
     return;
@@ -52,7 +59,7 @@ async function sendEmail({ to, subject, text, html }) {
 
   await createTransport().sendMail({
     from: process.env.SMTP_FROM,
-    replyTo: contactEmail('support'),
+    replyTo: replyTo || contactEmail('support'),
     to,
     subject,
     text,
@@ -71,6 +78,23 @@ async function sendAccountNotice(email, kind, details = {}) {
   await sendEmail({ to: email, ...accountNoticeEmail({ kind, ...details }) });
 }
 
+// A Help & Support message, to the support mailbox. Pressing Reply answers the sender.
+async function sendSupportMessage(details) {
+  await sendEmail({
+    to: contactEmail('support'),
+    replyTo: details.name ? { name: details.name, address: details.email } : details.email,
+    ...supportMessageEmail(details),
+  });
+}
+
+// "We got your message", to the sender.
+async function sendSupportReceipt(details) {
+  await sendEmail({ to: details.email, ...supportReceiptEmail(details) });
+}
+
+module.exports = {
+  canSendEmail, sendEmail, sendVerificationCode, sendAccountNotice, sendSupportMessage, sendSupportReceipt,
+};
 module.exports = { sendEmail, sendVerificationCode, sendAccountNotice };
 async function sendCoachInvitation(to, details) {
   await sendEmail({ to, ...coachInvitationEmail(details) });

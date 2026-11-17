@@ -18,6 +18,7 @@ The read-only match data is public so the website can show it to visitors:
 - `GET /api/rankings`, `GET /api/rankings/overview` and `GET /api/rankings/filters`
 - `GET /api/competitions`, `GET /api/competitions/:id` and `GET /api/competitions/:id/standings`
 - `GET /api/teams`, `GET /api/teams/:id` and `GET /api/teams/:id/record`
+- `POST /api/support/messages` (login optional)
 
 Everything else needs a login: rosters, join requests, lineups, match reports, `/api/me/...`, and every write.
 `?mine=true` and `?favorites=true` on the fixture and team lists also need one (`401 NO_TOKEN` without it).
@@ -87,6 +88,55 @@ Response `200`:
 ```
 
 `GET /.well-known/security.txt` publishes the security address in the standard format.
+
+### POST /api/support/messages
+
+The Help & Support screen. Login is optional: send the token when signed in so support knows who wrote; the
+landing page can send it signed out.
+
+```json
+{
+  "topic": "matches",
+  "subject": "Can't see my team's matches",
+  "message": "I joined Northview U16 netball last week but no matches show on Home.",
+  "email": "ada@example.com",
+  "name": "Ada Obi",
+  "app": { "platform": "android", "version": "1.0.0" }
+}
+```
+
+| Field | Rules |
+|---|---|
+| `topic` | Required. `account`, `matches`, `teams` or `other` |
+| `subject` | Optional, 150 characters at most. Missing or empty: built from the topic (e.g. "Help with matches") |
+| `message` | Required, 10 to 5000 characters (after trimming) |
+| `email` | Required when signed out: where support replies. Ignored when signed in (the account's email is used) |
+| `name` | Optional when signed out, 100 characters at most. Ignored when signed in (the account's name is used) |
+| `app.platform` | Optional. `android`, `ios` or `web` |
+| `app.version` | Optional, 20 characters at most |
+
+Response `201`:
+
+```json
+{ "id": 12, "replyTo": "ada@example.com", "message": "Thanks. We'll reply to ada@example.com." }
+```
+
+The message is emailed to the support address (`CONTACT_EMAIL_SUPPORT`) with Reply-To set to the sender, so
+support can just press Reply. The email includes the reference number, platform and app version and, when
+signed in, the user's id, role and school. The sender gets a short "We got your message (#12)" email.
+Every message is also saved in the `support_messages` table. If the support email fails to send, the
+message is still saved (and the request still succeeds) with `emailed_at` empty:
+`SELECT * FROM support_messages WHERE emailed_at IS NULL`.
+
+Errors:
+
+- `400 VALIDATION_ERROR` with `details` (`[{ "field": "message", "message": "Message must be 10 to 5000 characters" }]`).
+  Nested fields are named `app.platform` and `app.version`.
+- `401` when a token is sent but is expired or invalid (refresh it, as on other routes; it is not treated as
+  signed out).
+- `429 TOO_MANY_REQUESTS` with a `Retry-After` header (seconds): 5 accepted messages per hour per signed-in user,
+  or per IP address when signed out. Refused (`400`) attempts do not count.
+- `503 SUPPORT_UNAVAILABLE` when the server cannot send email (SMTP not set up).
 
 ## Auth
 

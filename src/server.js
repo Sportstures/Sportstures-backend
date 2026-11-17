@@ -30,6 +30,7 @@ app.get('/.well-known/security.txt', (req, res) => {
 });
 
 app.use('/api/contact', require('./routes/contact'));
+app.use('/api/support', require('./routes/support'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/sports', require('./routes/sports'));
 app.use('/api/schools', require('./routes/schools'));
