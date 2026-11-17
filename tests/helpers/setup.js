@@ -85,7 +85,6 @@ async function startTestApp() {
         supportEmails.push({ kind: 'message', ...details });
       },
       sendSupportReceipt: async (details) => { supportEmails.push({ kind: 'receipt', ...details }); },
-      sendVerificationCode: async (to, otp) => { sentEmails.push({ to, otp }); },
       sendCoachInvitation: async (to, details) => {
         if (control.failInvites) throw new Error('smtp down');
         sentInvites.push({ to, ...details });
@@ -152,8 +151,10 @@ async function startTestApp() {
     await admin.end();
   }
 
-  return { api, origin, pool: setupPool, lastCode, sentEmails, notices, supportEmails, mail, uploads, deleted, stop };
-  return { api, pool: setupPool, lastCode, sentEmails, sentInvites, control, stop };
+  return {
+    api, origin, pool: setupPool, lastCode, sentEmails, notices, supportEmails, mail, sentInvites, control,
+    uploads, deleted, stop,
+  };
 }
 
 // Test data builders matching the mobile signup screens.
