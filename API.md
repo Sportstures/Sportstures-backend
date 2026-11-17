@@ -116,6 +116,7 @@ skipped by sending `sport: null` or omitting the property.
   "firstName": "Ada",
   "lastName": "Obi",
   "dateOfBirth": "2009-03-14",
+  "avatarUrl": null,
   "gender": "female",
   "school": { "name": "Example School", "grade": 10, "className": "10A" },
   "sport": { "name": "Football", "teamName": "Falcons", "jerseyNumber": 7, "level": "U16" },
@@ -239,6 +240,38 @@ Body: `{ "refreshToken": "..." }`. Response `200`: `{ "message": "Logged out" }`
 ### GET /api/auth/me (protected)
 
 Response `200`: `{ "user": { ... } }` (same user object as register, including `profile`).
+
+Every user object includes `avatarUrl`: the profile photo's address, or `null` when there is none.
+
+### PUT /api/me/avatar (protected)
+
+Upload or replace my profile photo. Any signed-in user (learner or coach).
+
+Send `multipart/form-data` with one file in the field **`photo`**: JPEG, PNG, WebP or HEIC (iPhone), up to
+5 MB. The type is read from the file itself, so the part's Content-Type does not matter. The photo is cropped
+square around the face and stored as a 512×512 JPEG on Cloudinary; a new upload replaces the old one.
+
+Response `200`: `{ "avatarUrl": "https://res.cloudinary.com/.../sportstures/avatars/user_12.jpg" }`
+
+The URL changes with each upload (it carries a version number), so caches show the new photo straight away.
+
+Errors: `400 NO_FILE` (no `photo` field), `400 INVALID_UPLOAD` (wrong field name or more than one file),
+`400 INVALID_IMAGE` (not a supported image), `413 FILE_TOO_LARGE`, `502 UPLOAD_FAILED` (Cloudinary failed; try
+again), `503 STORAGE_UNAVAILABLE` (Cloudinary is not set up on the server).
+
+Flutter (`http` package):
+
+```dart
+final req = http.MultipartRequest('PUT', Uri.parse('$apiBase/me/avatar'))
+  ..headers['Authorization'] = 'Bearer $accessToken'
+  ..files.add(await http.MultipartFile.fromPath('photo', pickedFile.path));
+// On web, use http.MultipartFile.fromBytes('photo', await pickedFile.readAsBytes(), filename: pickedFile.name)
+final res = await http.Response.fromStream(await req.send());
+```
+
+### DELETE /api/me/avatar (protected)
+
+Remove my profile photo. Response `200`: `{ "avatarUrl": null }` (also when there was none).
 
 ## Schools
 

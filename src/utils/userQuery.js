@@ -3,7 +3,7 @@
 // date_of_birth is formatted in SQL so it is a plain "YYYY-MM-DD" string (no timezone shift).
 const USER_SELECT = `u.id, u.email, u.first_name, u.last_name, u.phone,
   to_char(u.date_of_birth, 'YYYY-MM-DD') AS date_of_birth, u.gender,
-  r.name AS role, u.created_at`;
+  r.name AS role, u.avatar_url, u.created_at`;
 
 const USER_FROM = 'FROM users u JOIN roles r ON r.id = u.role_id';
 
