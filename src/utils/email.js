@@ -92,12 +92,17 @@ async function sendSupportReceipt(details) {
   await sendEmail({ to: details.email, ...supportReceiptEmail(details) });
 }
 
-module.exports = {
-  canSendEmail, sendEmail, sendVerificationCode, sendAccountNotice, sendSupportMessage, sendSupportReceipt,
-};
-module.exports = { sendEmail, sendVerificationCode, sendAccountNotice };
+// An invitation for a coach at another school to join on Sportstures.
 async function sendCoachInvitation(to, details) {
   await sendEmail({ to, ...coachInvitationEmail(details) });
 }
 
-module.exports = { sendEmail, sendVerificationCode, sendCoachInvitation };
+module.exports = {
+  canSendEmail,
+  sendEmail,
+  sendVerificationCode,
+  sendAccountNotice,
+  sendSupportMessage,
+  sendSupportReceipt,
+  sendCoachInvitation,
+};
