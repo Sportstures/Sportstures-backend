@@ -69,6 +69,7 @@ const coachSignupRules = [
   body('schoolProvince').optional({ values: 'falsy' }).isIn(PROVINCES).withMessage('Select a valid province'),
   body('schoolTown').optional({ values: 'falsy' }).isString().trim().isLength({ max: 100 })
     .withMessage('Must be 100 characters or fewer'),
+  body('inviteCode').optional({ values: 'falsy' }).isString().isLength({ max: 64 }),
   body('coachingRole').isIn(['head_coach', 'assistant_coach', 'fitness_coach', 'team_manager'])
     .withMessage('Select a valid coaching role'),
   body('experience').isIn(['less_than_1_year', '1_3_years', '3_5_years', '5_10_years', '10_plus_years'])

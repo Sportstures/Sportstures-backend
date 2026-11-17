@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const { contactEmail } = require('./contacts');
 const { crestAttachment } = require('../emails/layout');
 const { verificationCodeEmail } = require('../emails/verificationCode');
+const { coachInvitationEmail } = require('../emails/coachInvitation');
 
 function createTransport() {
   const host = process.env.SMTP_HOST;
@@ -63,4 +64,8 @@ async function sendVerificationCode(email, otp, { firstName, expiresInMinutes } 
   await sendEmail({ to: email, ...verificationCodeEmail({ otp, firstName, expiresInMinutes }) });
 }
 
-module.exports = { sendEmail, sendVerificationCode };
+async function sendCoachInvitation(to, details) {
+  await sendEmail({ to, ...coachInvitationEmail(details) });
+}
+
+module.exports = { sendEmail, sendVerificationCode, sendCoachInvitation };
