@@ -43,6 +43,7 @@ app.use('/api/teams', require('./routes/roster'));
 app.use('/api/me/favorites', require('./routes/favorites'));
 app.use('/api/me', require('./routes/me'));
 app.use('/api/coach', require('./routes/coach'));
+app.use('/api/invitations', require('./routes/invitations'));
 
 // Routes placeholder (to be implemented)
 // app.use('/api/users', require('./routes/users'));
