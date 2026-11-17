@@ -1,31 +1,14 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const rateLimit = require('express-rate-limit');
 const controller = require('../controllers/authController');
+const accountController = require('../controllers/accountController');
+const { authLimiter, otpLimiter } = require('../middleware/rateLimits');
+const { passwordRule, codeRule } = require('../middleware/rules');
 const validate = require('../middleware/validate');
 const { authenticate } = require('../middleware/auth');
 const { PROVINCES } = require('../utils/schools');
 
 const router = express.Router();
-
-// Slows down password guessing and mass sign-ups from one IP.
-// Set AUTH_RATE_LIMIT_MAX in .env to raise it while developing (default 20 per 15 minutes).
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many attempts, try again later' } },
-});
-
-// Verification-code attempts per IP per 15 minutes (default 10). Tests raise it with OTP_RATE_LIMIT_MAX.
-const otpLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: parseInt(process.env.OTP_RATE_LIMIT_MAX, 10) || 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: { code: 'TOO_MANY_REQUESTS', message: 'Too many verification attempts, try again later' } },
-});
 
 const emailRule = body('email')
   .isEmail().withMessage('A valid email is required')
@@ -151,12 +134,7 @@ router.post(
   [
     emailRule,
     ...playerRegistrationRules,
-    body('password')
-      .isString().withMessage('Password is required')
-      // bcrypt only uses the first 72 bytes, so cap the length.
-      .isLength({ min: 8, max: 72 }).withMessage('Password must be 8 to 72 characters')
-      .matches(/[A-Za-z]/).withMessage('Password must contain a letter')
-      .matches(/[0-9]/).withMessage('Password must contain a number'),
+    passwordRule('password'),
     body('firstName').optional({ values: 'falsy' }).isString().trim().isLength({ max: 100 }),
     body('lastName').optional({ values: 'falsy' }).isString().trim().isLength({ max: 100 }),
     body('phone').optional({ values: 'falsy' }).isString().trim().isLength({ max: 20 })
@@ -194,6 +172,16 @@ router.post(
   [emailRule, body('password').isString().notEmpty().withMessage('Password is required')],
   validate,
   controller.login
+);
+
+// Forgot password: a code is emailed, then sent back with the new password.
+router.post('/forgot-password', authLimiter, [emailRule], validate, accountController.forgotPassword);
+router.post(
+  '/reset-password',
+  otpLimiter,
+  [emailRule, codeRule(), passwordRule('newPassword')],
+  validate,
+  accountController.resetPassword
 );
 
 router.post('/refresh', [refreshTokenRule], validate, controller.refresh);

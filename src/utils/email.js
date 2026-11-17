@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const { contactEmail } = require('./contacts');
 const { crestAttachment } = require('../emails/layout');
 const { verificationCodeEmail } = require('../emails/verificationCode');
+const { accountNoticeEmail } = require('../emails/accountNotice');
 const { coachInvitationEmail } = require('../emails/coachInvitation');
 
 function createTransport() {
@@ -60,10 +61,17 @@ async function sendEmail({ to, subject, text, html }) {
   });
 }
 
-async function sendVerificationCode(email, otp, { firstName, expiresInMinutes } = {}) {
-  await sendEmail({ to: email, ...verificationCodeEmail({ otp, firstName, expiresInMinutes }) });
+// `purpose` is 'signup' (default), 'password_reset' or 'email_change'.
+async function sendVerificationCode(email, otp, { firstName, expiresInMinutes, purpose } = {}) {
+  await sendEmail({ to: email, ...verificationCodeEmail({ otp, firstName, expiresInMinutes, purpose }) });
 }
 
+// Tells the user about a security change: 'password_changed' or 'email_changed' (sent to the OLD address).
+async function sendAccountNotice(email, kind, details = {}) {
+  await sendEmail({ to: email, ...accountNoticeEmail({ kind, ...details }) });
+}
+
+module.exports = { sendEmail, sendVerificationCode, sendAccountNotice };
 async function sendCoachInvitation(to, details) {
   await sendEmail({ to, ...coachInvitationEmail(details) });
 }

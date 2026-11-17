@@ -273,6 +273,110 @@ final res = await http.Response.fromStream(await req.send());
 
 Remove my profile photo. Response `200`: `{ "avatarUrl": null }` (also when there was none).
 
+## Changing an account after signup
+
+All codes below are 6 digits, sent by email, valid for 10 minutes, and work once. A new code can be requested
+after 60 seconds (`429 TOO_MANY_REQUESTS` with a `Retry-After` header before then). Five wrong codes lock the
+code (`429`) until a new one is requested. Wrong or expired codes answer `400 INVALID_OTP`.
+
+### PATCH /api/me/profile (protected)
+
+Change any of my profile details. Send only the fields to change; everything else stays as it is.
+Response `200`: `{ "user": { ... } }`, the same user object as `GET /api/auth/me`.
+
+```json
+{
+  "firstName": "Ada", "lastName": "Obi", "phone": "+27 82 555 0101",
+  "dateOfBirth": "2009-05-14", "gender": "female",
+  "school": { "name": "Northview High", "province": "Limpopo", "town": "Polokwane", "grade": 10, "className": "10C" },
+  "sport": { "name": "Netball", "teamName": "Northview U16", "jerseyNumber": 7, "level": "U16" }
+}
+```
+
+| Field | Rules |
+|---|---|
+| `firstName`, `lastName` | Not empty, 100 characters at most |
+| `phone` | Digits, spaces, `+`, `-` and brackets, 20 at most. `""` or `null` removes it |
+| `dateOfBirth` | A real `YYYY-MM-DD` date in the last 99 years, not in the future |
+| `gender` | `male` or `female` |
+| `school.name` | Finds the school by name (ignoring case) or creates it, as signup does. `province` and `town` may only be sent with `name`; they only fill a school's empty location |
+| `school.grade` | 1 to 12 |
+| `school.className` | Not empty, 50 characters at most |
+| `sport` | `null` removes the sport and its team name, jersey number and level |
+| `sport.name` | Finds the sport by name or creates it (`Soccer` becomes `Football`). Needed when the learner has no sport yet |
+| `sport.teamName`, `sport.level` | 100 / 50 characters at most. `""` or `null` clears them |
+| `sport.jerseyNumber` | 0 to 999. `""` or `null` clears it |
+
+Changing school or sport here does not move the learner between teams: team memberships are separate
+(`POST /api/teams/:id/join-requests`, `DELETE /api/teams/:id/membership`).
+
+Errors: `400 VALIDATION_ERROR` (with `details`), `400 NOTHING_TO_UPDATE` (empty body), `400 SPORT_REQUIRED`
+(team details sent with no sport), `400 USE_EMAIL_ENDPOINT` / `400 USE_PASSWORD_ENDPOINT` (`email` or `password`
+sent here), `403 LEARNER_ONLY` (a coach sent `school` or `sport`; coaches can change the personal fields).
+If any part fails, nothing in the request is saved.
+
+### PUT /api/me/password (protected)
+
+```json
+{ "currentPassword": "Passw0rdOK", "newPassword": "NewPassw0rd1" }
+```
+
+The new password follows the signup rules: 8 to 72 characters with a letter and a number.
+Response `200`: `{ "message": "Password changed", "user": { ... }, "accessToken": "...", "refreshToken": "..." }`.
+
+Every other device is signed out (their refresh tokens are revoked). **Save the new tokens** in place of the old
+ones: using the old refresh token after this counts as theft and signs this device out too. An email tells the
+user their password was changed.
+
+Errors: `400 WRONG_PASSWORD`, `400 SAME_PASSWORD`, `400 VALIDATION_ERROR`.
+
+### POST /api/me/email (protected)
+
+Start changing my email. Send the new address and my password:
+
+```json
+{ "newEmail": "ada.new@example.com", "password": "Passw0rdOK" }
+```
+
+A code is sent to the **new** address. Nothing changes until it is confirmed.
+Response `200`: `{ "email": "ada.new@example.com", "expiresInMinutes": 10, "retryAfterSeconds": 60 }`.
+
+Errors: `400 WRONG_PASSWORD`, `400 SAME_EMAIL`, `409 EMAIL_TAKEN`, `429 TOO_MANY_REQUESTS` (cooldown).
+
+### POST /api/me/email/verify (protected)
+
+```json
+{ "code": "123456" }
+```
+
+Response `200`: `{ "user": { ... } }` with the new email. From now on the user logs in with the new address,
+and the old address gets an email saying it was changed.
+
+Errors: `400 INVALID_OTP`, `429 TOO_MANY_REQUESTS` (locked), `409 EMAIL_TAKEN` (someone signed up with the
+address after the code was sent).
+
+### POST /api/auth/forgot-password (public)
+
+```json
+{ "email": "ada@example.com" }
+```
+
+Emails a reset code if an account exists. The response is always the same, so it does not reveal which emails
+have accounts: `200 { "message": "If an account exists for this email, a reset code has been sent",
+"expiresInMinutes": 10, "retryAfterSeconds": 60 }`.
+
+### POST /api/auth/reset-password (public)
+
+```json
+{ "email": "ada@example.com", "code": "123456", "newPassword": "NewPassw0rd1" }
+```
+
+Response `200`: `{ "message": "Password reset. You can now log in." }`. Every device is signed out, the user
+gets an email saying the password changed, and the app sends them to the login screen. A learner who never
+verified their signup is verified by this too (the code proves they own the address).
+
+Errors: `400 INVALID_OTP` (also for an unknown email), `429 TOO_MANY_REQUESTS`, `400 VALIDATION_ERROR`.
+
 ## Schools
 
 Schools are created automatically from signup (by name, ignoring case). Provinces are exactly:

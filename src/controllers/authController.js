@@ -1,5 +1,8 @@
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const {
+  generateOtp, hashOtp, OTP_TTL_MINUTES, OTP_RESEND_SECONDS, OTP_MAX_ATTEMPTS,
+} = require('../utils/accountCodes');
 const pool = require('../../db/config');
 const { signAccessToken, generateRefreshToken, hashToken } = require('../utils/tokens');
 const { sendVerificationCode } = require('../utils/email');
@@ -8,26 +11,12 @@ const { findOrCreateSchool } = require('../utils/schools');
 const { findOrCreateSport } = require('../utils/sports');
 
 const BCRYPT_ROUNDS = 12;
-const OTP_LENGTH = 6;
-const OTP_TTL_MINUTES = 10;
-const OTP_RESEND_SECONDS = 60;
-const OTP_MAX_ATTEMPTS = 5;
 
 // Used so a login for an unknown email takes about as long as one for a real email.
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', BCRYPT_ROUNDS);
 
 function errorBody(code, message) {
   return { error: { code, message } };
-}
-
-function generateOtp() {
-  return crypto.randomInt(0, 1_000_000).toString().padStart(OTP_LENGTH, '0');
-}
-
-function hashOtp(otp) {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error('JWT_SECRET is not set. Add it to your .env file.');
-  return crypto.createHmac('sha256', secret).update(otp).digest('hex');
 }
 
 function saveOtp(client, userId, otp) {
@@ -523,4 +512,7 @@ async function me(req, res, next) {
   }
 }
 
-module.exports = { register, registerCoach, login, verifyOtp, resendOtp, refresh, logout, me };
+module.exports = {
+  register, registerCoach, login, verifyOtp, resendOtp, refresh, logout, me,
+  withProfile, issueTokens, BCRYPT_ROUNDS,
+};

@@ -62,6 +62,7 @@ async function startTestApp() {
 
   // Capture verification codes instead of sending email.
   const sentEmails = [];
+  const notices = [];
   const sentInvites = [];
   const control = { failInvites: false };
   const emailModule = require.resolve(path.join(root, 'src/utils/email.js'));
@@ -71,6 +72,10 @@ async function startTestApp() {
     loaded: true,
     exports: {
       sendEmail: async () => {},
+      sendVerificationCode: async (to, otp, options = {}) => {
+        sentEmails.push({ to, otp, purpose: options.purpose || 'signup' });
+      },
+      sendAccountNotice: async (to, kind, details = {}) => { notices.push({ to, kind, ...details }); },
       sendVerificationCode: async (to, otp) => { sentEmails.push({ to, otp }); },
       sendCoachInvitation: async (to, details) => {
         if (control.failInvites) throw new Error('smtp down');
