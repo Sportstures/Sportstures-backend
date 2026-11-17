@@ -3,6 +3,7 @@ const { contactEmail } = require('./contacts');
 const { crestAttachment } = require('../emails/layout');
 const { verificationCodeEmail } = require('../emails/verificationCode');
 const { accountNoticeEmail } = require('../emails/accountNotice');
+const { coachInvitationEmail } = require('../emails/coachInvitation');
 
 function createTransport() {
   const host = process.env.SMTP_HOST;
@@ -71,3 +72,8 @@ async function sendAccountNotice(email, kind, details = {}) {
 }
 
 module.exports = { sendEmail, sendVerificationCode, sendAccountNotice };
+async function sendCoachInvitation(to, details) {
+  await sendEmail({ to, ...coachInvitationEmail(details) });
+}
+
+module.exports = { sendEmail, sendVerificationCode, sendCoachInvitation };

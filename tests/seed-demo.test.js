@@ -100,3 +100,64 @@ test('a reset with a real team at a demo school keeps that school; unused demo s
   const names = (await t.api('GET', '/api/schools?limit=100')).body.schools.map((s) => s.name);
   assert.deepEqual(names, ['Northview High']);
 });
+
+// ------------------------------------------------------------------ safety
+
+test('a missing migration is named, and nothing is created', async () => {
+  await t.pool.query('ALTER TABLE team_members RENAME TO team_members_hidden');
+  try {
+    await assert.rejects(seedDemo(t.pool), (err) => err.migrations === true && /007_team_members\.sql/.test(err.message));
+    assert.equal(await demoUsers(), 0);
+    assert.equal(await count('SELECT count(*)::int AS n FROM competitions'), 0);
+  } finally {
+    await t.pool.query('ALTER TABLE team_members_hidden RENAME TO team_members');
+  }
+});
+
+test('if the seed fails part-way, nothing is left behind', async () => {
+  // A pool whose connections fail on the very last step (adding the demo player to the roster).
+  const flaky = {
+    totalCount: 0,
+    query: (...a) => t.pool.query(...a),
+    connect: async () => {
+      const client = await t.pool.connect();
+      // A wrapper, not a patched client: the real connection goes back to the pool untouched.
+      return {
+        query: (sql, ...rest) => (typeof sql === 'string' && sql.includes('INSERT INTO team_members')
+          ? Promise.reject(new Error('boom'))
+          : client.query(sql, ...rest)),
+        release: () => client.release(),
+      };
+    },
+  };
+  const teamsBefore = await count('SELECT count(*)::int AS n FROM teams');
+  await assert.rejects(seedDemo(flaky), /boom/);
+  assert.equal(await demoUsers(), 0);
+  assert.equal(await count('SELECT count(*)::int AS n FROM teams'), teamsBefore);
+  assert.equal(await count('SELECT count(*)::int AS n FROM competitions'), 0);
+  assert.equal(await count('SELECT count(*)::int AS n FROM fixtures'), 0);
+
+  // and it still works afterwards
+  assert.equal((await seedDemo(t.pool)).skipped, false);
+});
+
+test('a failed --reset keeps the existing demo data', async () => {
+  const before = await count('SELECT count(*)::int AS n FROM fixtures');
+  const flaky = {
+    totalCount: 0,
+    query: (...a) => t.pool.query(...a),
+    connect: async () => {
+      const client = await t.pool.connect();
+      // A wrapper, not a patched client: the real connection goes back to the pool untouched.
+      return {
+        query: (sql, ...rest) => (typeof sql === 'string' && sql.includes('INSERT INTO team_members')
+          ? Promise.reject(new Error('boom'))
+          : client.query(sql, ...rest)),
+        release: () => client.release(),
+      };
+    },
+  };
+  await assert.rejects(seedDemo(flaky, { reset: true }), /boom/);
+  assert.equal(await count('SELECT count(*)::int AS n FROM fixtures'), before, 'the old demo data is still there');
+  assert.equal(await demoUsers(), 33);
+});

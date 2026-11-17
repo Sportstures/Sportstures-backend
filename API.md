@@ -1105,6 +1105,33 @@ A match stays in `upcoming` until 4 hours after kick-off. Action items, most urg
 
 Cancelled matches never produce items.
 
+## Inviting coaches from other schools
+
+A coach can bring in a coach at another school two ways: **email** (the system sends an official invitation) or a **share link** (copy it into WhatsApp, social media or an email). Both end at the website's coach signup page, `{WEBSITE_URL}/signup?invite=<code>`. Needs migration `012_invitations.sql`. Set `WEBSITE_URL` on the server (for example `https://sportstures.co.za`); it defaults to `http://localhost:3000`.
+
+### POST /api/invitations (coaches and admins)
+Send `{ "email": "head@otherschool.co.za" }` to email an invitation (`201`, or `200` if that address was already invited: the same invitation is sent again with a fresh 14-day expiry). Send `{}` to get your **share link** (one per coach, valid 90 days, reused; `201` the first time, `200` after). Both return:
+
+```json
+{ "invitation": { "id": 4, "kind": "email", "email": "head@otherschool.co.za", "status": "pending",
+  "link": "https://.../signup?invite=Xk3...", "code": "Xk3...", "joined": 0, "emailSent": true,
+  "createdAt": "...", "expiresAt": "..." } }
+```
+
+Errors: `400 INVITE_SELF`, `409 ALREADY_REGISTERED` (that address already has an account), `429 INVITE_LIMIT` (20 emails a day, set `INVITE_EMAILS_PER_DAY`), `502 EMAIL_FAILED` (nothing is saved; offer the share link instead).
+
+### GET /api/invitations (coaches and admins)
+`{ "invitations": [...], "joined": 3 }`. `status` is `pending`, `accepted` (email invitations once that coach registers), `expired` or `cancelled`. `joined` counts the coaches who registered through that invitation; one share link can bring in many.
+
+### DELETE /api/invitations/:id (the inviter)
+`204`. The link stops working. Coaches who already joined are not affected.
+
+### GET /api/invitations/:code (public)
+For the signup page: `{ "valid": true, "inviterName": "Sipho Williams", "schoolName": "Jeppe High", "email": null }` (`email` is set for email invitations, so the form can fill it in). `404 INVITATION_INVALID` when the code is unknown, cancelled or expired.
+
+### Registering with an invitation
+Add `"inviteCode": "<code>"` to `POST /api/auth/register/coach`. A wrong or expired code never blocks signup; it is just ignored.
+
 ## Protecting a new route (for backend developers)
 
 ```js
