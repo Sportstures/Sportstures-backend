@@ -10,7 +10,7 @@ const {
   errorBody, FULL_TEAM_SELECT, mapFullTeam, FIXTURE_SELECT, FIXTURE_FROM, mapFixture,
 } = require('../utils/serializers');
 const { PROVINCES } = require('../utils/schools');
-const { withFavorites } = require('../utils/favorites');
+const { withFavorites, followedSchoolIds } = require('../utils/favorites');
 
 const router = express.Router();
 
@@ -48,7 +48,7 @@ async function mySchoolIds(user) {
   return new Set(rows.map((r) => r.school_id));
 }
 
-function mapSchool(r, mine = new Set()) {
+function mapSchool(r, mine = new Set(), followed = new Set()) {
   return {
     id: r.id,
     name: r.name,
@@ -64,10 +64,12 @@ function mapSchool(r, mine = new Set()) {
       winRate: r.played ? Math.round((r.won / r.played) * 100) : null,
     },
     mySchool: mine.has(r.id),
+    following: followed.has(r.id),
   };
 }
 
-// GET /api/schools?q=&province=&sportId=&mine=true&limit=&offset=  (public; mine needs a login)
+// GET /api/schools?q=&province=&sportId=&mine=true&following=true&limit=&offset=
+// (public; mine and following need a login)
 // q matches the school's name or town. sportId: schools with a team in that sport.
 router.get(
   '/',
@@ -77,14 +79,15 @@ router.get(
     query('q').optional().isString().trim().isLength({ max: 100 }),
     query('sportId').optional().isInt({ min: 1 }).withMessage('sportId must be a number').toInt(),
     query('mine').optional().isBoolean().withMessage('mine must be true or false').toBoolean(),
+    query('following').optional().isBoolean().withMessage('following must be true or false').toBoolean(),
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
     query('offset').optional().isInt({ min: 0 }).toInt(),
   ],
   validate,
   async (req, res, next) => {
     try {
-      const { province, q, sportId, mine } = req.query;
-      if (mine && !requireUser(req, res)) return;
+      const { province, q, sportId, mine, following } = req.query;
+      if ((mine || following) && !requireUser(req, res)) return;
       const limit = req.query.limit || 50;
       const offset = req.query.offset || 0;
       const where = [];
@@ -97,6 +100,8 @@ router.get(
       if (sportId) add('EXISTS (SELECT 1 FROM teams t WHERE t.school_id = s.id AND t.sport_id = ?)', sportId);
       const myIds = await mySchoolIds(req.user);
       if (mine) add('s.id = ANY(?::int[])', [...myIds]);
+      const followedIds = await followedSchoolIds(req.user);
+      if (following) add('s.id = ANY(?::int[])', [...followedIds]);
 
       const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
       const total = (await pool.query(`SELECT count(*)::int AS n FROM schools s ${whereSql}`, params)).rows[0].n;
@@ -105,7 +110,7 @@ router.get(
         [...params, limit, offset]
       );
       res.json({
-        schools: rows.map((r) => mapSchool(r, myIds)),
+        schools: rows.map((r) => mapSchool(r, myIds, followedIds)),
         total,
         limit,
         offset,
@@ -151,7 +156,7 @@ router.get('/:id', optionalAuthenticate, [idParam], validate, async (req, res, n
     const school = await loadSchool(req.params.id);
     if (!school) return res.status(404).json(errorBody('NOT_FOUND', 'School not found'));
     const ofSchool = '(hmt.school_id = $1 OR amt.school_id = $1)';
-    const [teams, results, upcoming, myIds] = await Promise.all([
+    const [teams, results, upcoming, myIds, followedIds] = await Promise.all([
       pool.query(`${FULL_TEAM_SELECT} WHERE t.school_id = $1 ORDER BY t_sp.name NULLS LAST, t.name`, [school.id]),
       pool.query(
         `SELECT ${FIXTURE_SELECT} ${FIXTURE_FROM} WHERE ${ofSchool} AND f.status = 'finished'
@@ -164,9 +169,10 @@ router.get('/:id', optionalAuthenticate, [idParam], validate, async (req, res, n
         [school.id]
       ),
       mySchoolIds(req.user),
+      followedSchoolIds(req.user),
     ]);
     res.json({
-      school: mapSchool(school, myIds),
+      school: mapSchool(school, myIds, followedIds),
       teams: await withFavorites(teams.rows.map(mapFullTeam), req.user),
       recentResults: results.rows.map(mapFixture),
       upcoming: upcoming.rows.map(mapFixture),
@@ -209,7 +215,7 @@ router.patch(
         params.push(school.id);
         await pool.query(`UPDATE schools SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
       }
-      res.json({ school: mapSchool(await loadSchool(school.id), await mySchoolIds(req.user)) });
+      res.json({ school: mapSchool(await loadSchool(school.id), await mySchoolIds(req.user), await followedSchoolIds(req.user)) });
     } catch (err) {
       next(err);
     }

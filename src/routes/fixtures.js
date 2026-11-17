@@ -4,6 +4,7 @@ const pool = require('../../db/config');
 const validate = require('../middleware/validate');
 const { authenticate, optionalAuthenticate, requireUser, requireRole } = require('../middleware/auth');
 const { errorBody, FIXTURE_SELECT, FIXTURE_FROM, mapFixture } = require('../utils/serializers');
+const { FEED_CONDITION } = require('../utils/favorites');
 
 const router = express.Router();
 
@@ -33,7 +34,7 @@ async function checkReferences({ competitionId }) {
 
 // GET /api/fixtures
 //   teamId, sportId, competitionId, status, from, to (ISO dates), mine=true (teams I coach),
-//   favorites=true (my favourite teams and sports),
+//   favorites=true (my favourite teams, followed schools and favourite sports),
 //   when=upcoming|past, order=asc|desc, limit, offset
 // Public: no login needed (mine=true does need one).
 router.get(
@@ -73,15 +74,8 @@ router.get(
       if (from) add('f.match_date >= ?', from);
       if (to) add('f.match_date <= ?', to);
       if (mine) add('(hcu.id = ? OR acu.id = ?)', req.user.id);
-      // My feed: matches with a favourite team or in a favourite sport. With no favourites, everything.
-      if (favorites) {
-        add(`((NOT EXISTS (SELECT 1 FROM user_favorite_teams WHERE user_id = ?)
-                AND NOT EXISTS (SELECT 1 FROM user_favorite_sports WHERE user_id = ?))
-              OR f.home_team_id IN (SELECT team_id FROM user_favorite_teams WHERE user_id = ?)
-              OR f.away_team_id IN (SELECT team_id FROM user_favorite_teams WHERE user_id = ?)
-              OR hmt.sport_id IN (SELECT sport_id FROM user_favorite_sports WHERE user_id = ?)
-              OR amt.sport_id IN (SELECT sport_id FROM user_favorite_sports WHERE user_id = ?))`, req.user.id);
-      }
+      // My feed: matches of a favourite team or a followed school, or in a favourite sport. With none, everything.
+      if (favorites) add(FEED_CONDITION, req.user.id);
       // upcoming = still to be played; past = played (has a final score)
       if (when === 'upcoming') where.push("f.status IN ('scheduled', 'live', 'postponed')");
       if (when === 'past') where.push("f.status = 'finished'");

@@ -1,5 +1,5 @@
-// A signed-in person's favourite sports and teams (and the competitions they follow), which shape
-// their feed. Mounted at /api/me/favorites.
+// A signed-in person's favourite sports and teams (and the schools and competitions they follow), which
+// shape their feed. Mounted at /api/me/favorites.
 const express = require('express');
 const { body, param } = require('express-validator');
 const pool = require('../../db/config');
@@ -22,7 +22,7 @@ async function findSport(value) {
 }
 
 async function favourites(userId) {
-  const [sports, teams, competitions] = await Promise.all([
+  const [sports, teams, schools, competitions] = await Promise.all([
     pool.query(
       `${SPORT_SELECT} WHERE id IN (SELECT sport_id FROM user_favorite_sports WHERE user_id = $1)
         ORDER BY array_position($2::text[], category) NULLS LAST, sort_order NULLS LAST, name`,
@@ -30,6 +30,12 @@ async function favourites(userId) {
     ),
     pool.query(
       `${FULL_TEAM_SELECT} WHERE t.id IN (SELECT team_id FROM user_favorite_teams WHERE user_id = $1) ORDER BY t.name`,
+      [userId]
+    ),
+    pool.query(
+      `SELECT s.id, s.name, s.province, s.town
+         FROM user_followed_schools fs JOIN schools s ON s.id = fs.school_id
+        WHERE fs.user_id = $1 ORDER BY s.name`,
       [userId]
     ),
     pool.query(
@@ -44,13 +50,14 @@ async function favourites(userId) {
   return {
     sports: sports.rows.map(mapSport),
     teams: teams.rows.map((r) => ({ ...mapFullTeam(r), favorite: true })),
+    schools: schools.rows.map((r) => ({ ...r, following: true })),
     competitions: competitions.rows.map((r) => ({
       id: r.id, name: r.name, sport: r.sport_id ? { id: r.sport_id, name: r.sport_name } : null,
     })),
   };
 }
 
-// GET /api/me/favorites: { sports, teams, competitions }.
+// GET /api/me/favorites: { sports, teams, schools, competitions }.
 router.get('/', async (req, res, next) => {
   try {
     res.json(await favourites(req.user.id));
@@ -132,5 +139,26 @@ const toggleTeam = (on) => async (req, res, next) => {
 const teamParam = param('teamId').isInt({ min: 1 }).withMessage('teamId must be a number').toInt();
 router.put('/teams/:teamId', [teamParam], validate, toggleTeam(true));
 router.delete('/teams/:teamId', [teamParam], validate, toggleTeam(false));
+
+// PUT /api/me/favorites/schools/:schoolId and DELETE: follow or unfollow a school. Every match of its teams
+// then shows in the feed. Safe to repeat.
+const toggleSchool = (on) => async (req, res, next) => {
+  try {
+    const school = (await pool.query('SELECT id FROM schools WHERE id = $1', [req.params.schoolId])).rows[0];
+    if (!school) return res.status(404).json(errorBody('NOT_FOUND', 'School not found'));
+    await pool.query(
+      on
+        ? 'INSERT INTO user_followed_schools (user_id, school_id) VALUES ($1, $2) ON CONFLICT DO NOTHING'
+        : 'DELETE FROM user_followed_schools WHERE user_id = $1 AND school_id = $2',
+      [req.user.id, school.id]
+    );
+    res.json({ schoolId: school.id, following: on });
+  } catch (err) {
+    next(err);
+  }
+};
+const schoolParam = param('schoolId').isInt({ min: 1 }).withMessage('schoolId must be a number').toInt();
+router.put('/schools/:schoolId', [schoolParam], validate, toggleSchool(true));
+router.delete('/schools/:schoolId', [schoolParam], validate, toggleSchool(false));
 
 module.exports = router;
