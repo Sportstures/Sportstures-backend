@@ -417,7 +417,8 @@ Response: `{ "competitionId": 3, "following": true }`.
 
 Body: `{ "name": "...", "sportId": 2, "season": "2026" }` (only `name` required), plus the optional card
 details `region` (a province or `National`), `ageGroup` (`U/14`, `U/16`, `U/19`, `Open`), `startDate`,
-`endDate` (YYYY-MM-DD) and `rounds` (1 to 500). Response `201`: `{ "competition": {...} }`, the full card.
+`endDate` (YYYY-MM-DD) and `rounds` (1 to 500), and the table rules `pointsWin`, `pointsDraw`, `pointsLoss`
+(0 to 10; default 3, 1, 0) and `tiebreakers` (see Table rules under standings). Response `201`: `{ "competition": {...} }`, the full card.
 `409 COMPETITION_EXISTS` if the name already exists (any case).
 
 ### PATCH /api/competitions/:id (the coach who created it, or admin)
@@ -537,9 +538,31 @@ before it has played (cancelled fixtures do not count).
 }
 ```
 
-- Points: win 3, draw 1, loss 0.
-- Order: points, then `difference` (`pointsFor` minus `pointsAgainst`), then `pointsFor`, then team name.
-  Teams level on all of those share a `position`.
+- Points: the competition's `pointsWin`, `pointsDraw` and `pointsLoss` (default 3, 1, 0).
+- Order: points first. Teams level on points are separated by the competition's `tiebreakers`, in order (see
+  below). Teams still level after every tiebreaker share a `position` and are listed by name.
+- Each row has `tiebreaker`: what separated it from the teams it was level with (`difference`, `for`,
+  `against`, `wins` or `head_to_head`), or `null` when its points were enough. The website can show this as
+  "Decided on head-to-head".
+- `competition.rules` says how the table is decided: `{ pointsWin, pointsDraw, pointsLoss, tiebreakers, custom }`.
+  `tiebreakers` is always the order in use; `custom` is false when the competition uses the standard rules.
+
+#### Table rules
+
+Each competition can set its own rules when it is created or edited (needs migration `013_standings_rules.sql`).
+`tiebreakers` is a list of up to five, each used once, applied in order to the teams still level:
+
+| Tiebreaker | Meaning |
+| --- | --- |
+| `difference` | higher `pointsFor` minus `pointsAgainst` first |
+| `for` | more scored first |
+| `against` | fewer conceded first |
+| `wins` | more wins first |
+| `head_to_head` | a mini table of only the matches between the tied teams: points, then difference, then scored |
+
+The standard order, used when `tiebreakers` is left out or `null`, is `["difference", "for", "head_to_head"]`.
+`PATCH` with `"tiebreakers": null` goes back to it. Invalid lists answer `400`. The schools table
+(`GET /api/results/standings`) always uses the standard rules.
 - `form` is the last five results, oldest first (`W`, `D` or `L`).
 - `404 NOT_FOUND` for an unknown competition. A competition with no fixtures returns `"standings": []`.
 
