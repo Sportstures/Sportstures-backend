@@ -197,6 +197,7 @@ Notes:
 | `CLOUDINARY_API_KEY` | *(API key)* | Cloudinary API key |
 | `CLOUDINARY_API_SECRET` | *(API secret)* | Cloudinary API secret; never commit it |
 | `CLOUDINARY_FOLDER` | `sportstures` | Optional folder prefix for uploads (default `sportstures`) |
+| `SUPPORT_RATE_LIMIT_MAX` | *(unset)* | Help & Support messages per user (or IP) per hour. Default 5 |
 | `CONTACT_EMAIL_*` | `support@sportstures.co.za` | Public addresses (see [Email](#email)). Optional; defaults to the addresses above |
 
 ## Project structure
