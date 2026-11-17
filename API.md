@@ -520,8 +520,13 @@ Filters:
 - `mine=true`: teams I coach
 - `favorites=true`: my favourite teams
 - `favorites=false`: every team except my favourites
+- `otherSchools=true`: leave out my own school's teams
 
-`favorites` needs a login.
+`favorites` and `otherSchools` need a login.
+
+For a learner's "Add teams from other schools" search, call `?otherSchools=true&favorites=false&q=&sportId=`, then
+add a team with `PUT /api/me/favorites/teams/:teamId` (remove it with `DELETE`). Added teams appear under
+`addedTeams` in `GET /api/me/school-sports`.
 
 For the Favourite Teams screen, call `?favorites=true` for "Your teams" and `?favorites=false&q=&sportId=` for
 "Add teams". Each row's "Football · U/19 · Gauteng" line is `sport.name · ageGroup · school.province`.
@@ -990,6 +995,34 @@ Errors: `REQUEST_PENDING`, `ALREADY_MEMBER` (both `409`), `403` for coaches and 
 ### DELETE /api/teams/:id/membership
 
 Leave a team, or cancel your own pending request. `404` if you are not on the team.
+
+### GET /api/me/school-sports
+
+The learner's **My school sports** screen: the sports at my school, each with its teams, and the teams I have
+added from other schools. Works for coaches too (their own school, no `mySport`).
+
+```json
+{
+  "school": { "id": 3, "name": "Jeppe High", "province": "Gauteng", "town": "Johannesburg" },
+  "sports": [
+    { "sport": { "id": 3, "name": "Netball", "key": "netball", "category": "team" }, "mySport": true,
+      "teams": [ { "id": 1, "name": "Jeppe Netball U16", "level": "u16", "ageGroup": "U/16", "sport": {...},
+                   "school": {...}, "coach": { "id": 9, "name": "Sipho Williams" }, "playerCount": 12,
+                   "favorite": false, "membership": "active" } ] },
+    { "sport": { "id": 6, "name": "Basketball", ... }, "mySport": false, "teams": [ ... ] }
+  ],
+  "addedTeams": [ { "id": 7, "name": "Northview Netball", "school": { "name": "Northview High", ... },
+                    "favorite": true, "membership": null, ... } ]
+}
+```
+
+- `sports`: every sport that has a team at my school. The learner's own sport (from their profile) is first with
+  `mySport: true`, then the rest by name. A team with no sport is listed last under `"sport": null`.
+- Teams are the same objects as `GET /api/teams`, plus `membership`: `"active"` (on the team), `"pending"` (asked
+  to join, `POST /api/teams/:id/join-requests`) or `null`.
+- `addedTeams`: my favourite teams from **other** schools, by school then name. Favourites at my own school are
+  shown with `favorite: true` under `sports` instead.
+- `school` is `null` (and `sports` empty) when the account has no school.
 
 ### GET /api/me/teams
 

@@ -42,6 +42,7 @@ router.get(
     query('schoolId').optional().isInt({ min: 1 }).toInt(),
     query('mine').optional().isBoolean().toBoolean(),
     query('favorites').optional().isBoolean().withMessage('favorites must be true or false').toBoolean(),
+    query('otherSchools').optional().isBoolean().withMessage('otherSchools must be true or false').toBoolean(),
     query('q').optional().isString().trim().isLength({ max: 100 }),
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
     query('offset').optional().isInt({ min: 0 }).toInt(),
@@ -49,8 +50,8 @@ router.get(
   validate,
   async (req, res, next) => {
     try {
-      const { sportId, schoolId, mine, favorites, q } = req.query;
-      if ((mine || favorites !== undefined) && !requireUser(req, res)) return;
+      const { sportId, schoolId, mine, favorites, otherSchools, q } = req.query;
+      if ((mine || otherSchools || favorites !== undefined) && !requireUser(req, res)) return;
       const limit = req.query.limit || 50;
       const offset = req.query.offset || 0;
       const where = [];
@@ -62,6 +63,12 @@ router.get(
       // The team or its school ("Search teams" finds "Northview High"). % and _ are plain text.
       if (q) add('(t.name ILIKE ? OR t_sc.name ILIKE ?)', `%${q.replace(/[\\%_]/g, '\\$&')}%`);
       if (mine) add('cu.id = ?', req.user.id); // teams coached by the logged-in user
+      // otherSchools=true: leave out my own school's teams (the learner's "Add teams from other schools").
+      if (otherSchools) {
+        add(`(t.school_id IS NULL OR t.school_id NOT IN (
+               SELECT school_id FROM learner_profiles WHERE user_id = ? AND school_id IS NOT NULL
+               UNION SELECT school_id FROM coaches WHERE user_id = ? AND school_id IS NOT NULL))`, req.user.id);
+      }
       // favorites=true: only my favourites; favorites=false: everything else (the "Add teams" list).
       if (favorites !== undefined) {
         add(`t.id ${favorites ? '' : 'NOT '}IN (SELECT team_id FROM user_favorite_teams WHERE user_id = ?)`, req.user.id);
