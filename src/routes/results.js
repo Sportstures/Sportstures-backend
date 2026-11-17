@@ -4,7 +4,8 @@ const express = require('express');
 const { query } = require('express-validator');
 const pool = require('../../db/config');
 const validate = require('../middleware/validate');
-const { optionalAuthenticate } = require('../middleware/auth');
+const { optionalAuthenticate, requireUser } = require('../middleware/auth');
+const { FEED_CONDITION } = require('../utils/favorites');
 const { FIXTURE_SELECT, FIXTURE_FROM, mapFixture, mapTeam, categoryLabel } = require('../utils/serializers');
 const { PROVINCES } = require('../utils/schools');
 const { buildTable } = require('../utils/standings');
@@ -52,6 +53,7 @@ function resultFilters(q) {
       `%${escapeLike(q.q)}%`);
   }
   if (PERIODS[q.period]) where.push(PERIODS[q.period]);
+  if (q.feedUserId) add(FEED_CONDITION, q.feedUserId);
 
   return { where: `WHERE ${where.join(' AND ')}`, params };
 }
@@ -63,12 +65,14 @@ const withCategory = (row) => {
 
 // GET /api/results
 //   q (team, school or venue), sportId, province, period=all|today|yesterday|week|month,
-//   from, to (YYYY-MM-DD, South African days), limit (days per page, default 3), offset (days to skip)
+//   from, to (YYYY-MM-DD, South African days), limit (days per page, default 3), offset (days to skip),
+//   favorites=true (only my feed: favourite teams, followed schools, favourite sports; needs a login)
 router.get(
   '/',
   optionalAuthenticate,
   [
     ...commonRules,
+    query('favorites').optional().isBoolean().withMessage('favorites must be true or false').toBoolean(),
     query('q').optional().isString().trim().isLength({ max: 100 }).withMessage('q must be 100 characters or fewer'),
     query('period').optional().isIn(Object.keys(PERIODS)).withMessage(`period must be one of ${Object.keys(PERIODS).join(', ')}`),
     isoDay('from'),
@@ -79,9 +83,10 @@ router.get(
   validate,
   async (req, res, next) => {
     try {
+      if (req.query.favorites && !requireUser(req, res)) return;
       const limit = req.query.limit || 3;
       const offset = req.query.offset || 0;
-      const { where, params } = resultFilters(req.query);
+      const { where, params } = resultFilters({ ...req.query, feedUserId: req.query.favorites ? req.user.id : null });
 
       // Totals for the summary card cover every matching result, not just this page.
       const { rows: [totals] } = await pool.query(

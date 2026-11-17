@@ -50,7 +50,7 @@ test('the sports catalogue is grouped like the Favourite Sports screen, with the
 });
 
 test('picking sports by key or id, one tile at a time, safe to repeat', async () => {
-  assert.deepEqual((await me('GET', '')).body, { sports: [], teams: [], competitions: [] });
+  assert.deepEqual((await me('GET', '')).body, { sports: [], teams: [], schools: [], competitions: [] });
 
   const netball = await me('PUT', '/sports/netball');
   assert.deepEqual([netball.status, netball.body.sport.name, netball.body.favorite], [200, 'Netball', true]);

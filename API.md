@@ -438,17 +438,18 @@ School object:
 { "id": 1, "name": "Northview High", "province": "Gauteng", "town": "Sandton", "teamCount": 4,
   "sports": ["Basketball", "Football"],
   "record": { "played": 12, "won": 7, "drawn": 2, "lost": 3, "winRate": 58 },
-  "mySchool": false }
+  "mySchool": false, "following": false }
 ```
 
 `record` counts finished matches of all the school's teams against other schools (a match between two teams
 of the same school is left out). `winRate` is a whole percentage, or `null` before any match.
 `mySchool` is `true` for the signed-in learner's or coach's own school (always `false` when not signed in).
+`following` is `true` when the signed-in person follows the school (see Favourites); always `false` when not signed in.
 `province` and `town` are `null` when unknown.
 
 ### GET /api/schools (public)
 
-The learner Find Schools screen. Send the token to get `mySchool`.
+The learner Find Schools screen. Send the token to get `mySchool` and `following`.
 
 | Query | Meaning |
 |---|---|
@@ -456,6 +457,7 @@ The learner Find Schools screen. Send the token to get `mySchool`.
 | `province` | One of the 9 provinces |
 | `sportId` | Schools with at least one team in that sport |
 | `mine=true` | Only my own school (needs a login, else `401`) |
+| `following=true` | Only the schools I follow (needs a login, else `401`) |
 | `limit` (max 100, default 50), `offset` | Paging |
 
 Response: `{ "schools": [...], "total": 23, "limit": 50, "offset": 0, "hasMore": false }`, sorted by name.
@@ -659,7 +661,7 @@ would fall before the start date.
 | `teamId` | Fixtures where the team is home or away |
 | `schoolId` | Fixtures where any team of the school is home or away |
 | `mine=true` | Fixtures for teams I coach (empty for learners for now) |
-| `favorites=true` | My feed: matches with one of my favourite teams or in one of my favourite sports. With no favourites picked, every match (the screen's "With none picked, your feed shows every sport") |
+| `favorites=true` | My feed: matches of one of my favourite teams or of any team of a school I follow, or in one of my favourite sports. With nothing picked or followed, every match (the screen's "With none picked, your feed shows every sport") |
 | `sportId`, `competitionId`, `status` | Exact filters |
 | `from`, `to` | ISO date-times that bound `matchDate` |
 | `order=asc` or `order=desc` | Overrides the default order |
@@ -810,6 +812,7 @@ count or rank anything itself. Days, `today` and the period tabs use **South Afr
 | `from`, `to` | `YYYY-MM-DD`, both included (the filter sheet's date range) |
 | `limit` | Days per page, default 3, max 31 (the screen shows 3 days, then "Load more results") |
 | `offset` | Days to skip: send `offset + limit` for the next page |
+| `favorites=true` | Only my feed: results of my favourite teams and followed schools, and in my favourite sports (same rule as `GET /api/fixtures?favorites=true`). Needs a login, else `401` |
 
 Only finished matches with a score are results. Response:
 
@@ -1073,8 +1076,9 @@ coach home "Total players" card.
 
 ## Favourites
 
-A signed-in person's favourite sports and teams. They shape the feed (`GET /api/fixtures?favorites=true`).
-Followed competitions (`PUT /api/competitions/:id/follow`) come back here too.
+A signed-in person's favourite sports and teams, and the schools they follow. They shape the feed
+(`GET /api/fixtures?favorites=true` and `GET /api/results?favorites=true`). Followed competitions
+(`PUT /api/competitions/:id/follow`) come back here too.
 
 ### GET /api/sports/categories (public)
 
@@ -1098,10 +1102,11 @@ The Favourite Sports screen's tiles, grouped and in screen order:
 ```json
 { "sports": [{ "id": 6, "name": "Netball", "key": "netball", "category": "team" }],
   "teams": [{ "id": 4, "name": "Basketball Boys", "favorite": true }],
+  "schools": [{ "id": 3, "name": "Protea Glen Secondary", "province": "Gauteng", "town": "Soweto", "following": true }],
   "competitions": [{ "id": 3, "name": "Schools League 2026 - Football", "sport": { "id": 4, "name": "Football" } }] }
 ```
 
-`teams` are full team objects (shortened above). Sports come in screen order; teams and competitions A to Z.
+`teams` are full team objects (shortened above). Sports come in screen order; teams, schools and competitions A to Z.
 
 ### PUT /api/me/favorites/sports/:sport and DELETE /api/me/favorites/sports/:sport
 
@@ -1118,6 +1123,13 @@ Response: the same as `GET /api/me/favorites`.
 
 Favourite or unfavourite a team. Response: `{ "teamId": 4, "favorite": true }`. Both are safe to repeat.
 `404 NOT_FOUND` for an unknown team. List them with `GET /api/teams?favorites=true` or `GET /api/me/favorites`.
+A favourite team's matches show in the feed.
+
+### PUT /api/me/favorites/schools/:schoolId and DELETE /api/me/favorites/schools/:schoolId
+
+Follow or unfollow a school (the Follow button on the school page). Every match of any of the school's teams,
+home or away, then shows in the feed. Response: `{ "schoolId": 3, "following": true }`. Both are safe to repeat.
+`404 NOT_FOUND` for an unknown school. List them with `GET /api/schools?following=true` or `GET /api/me/favorites`.
 
 ## Match lineups
 
