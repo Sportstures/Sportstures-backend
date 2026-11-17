@@ -66,6 +66,8 @@ async function startTestApp() {
   const supportEmails = [];
   // Tests flip these to act as if SMTP is not set up, or is down.
   const mail = { enabled: true, failSupport: false };
+  const sentInvites = [];
+  const control = { failInvites: false };
   const emailModule = require.resolve(path.join(root, 'src/utils/email.js'));
   require.cache[emailModule] = {
     id: emailModule,
@@ -83,6 +85,11 @@ async function startTestApp() {
         supportEmails.push({ kind: 'message', ...details });
       },
       sendSupportReceipt: async (details) => { supportEmails.push({ kind: 'receipt', ...details }); },
+      sendVerificationCode: async (to, otp) => { sentEmails.push({ to, otp }); },
+      sendCoachInvitation: async (to, details) => {
+        if (control.failInvites) throw new Error('smtp down');
+        sentInvites.push({ to, ...details });
+      },
     },
   };
 
@@ -146,6 +153,7 @@ async function startTestApp() {
   }
 
   return { api, origin, pool: setupPool, lastCode, sentEmails, notices, supportEmails, mail, uploads, deleted, stop };
+  return { api, pool: setupPool, lastCode, sentEmails, sentInvites, control, stop };
 }
 
 // Test data builders matching the mobile signup screens.

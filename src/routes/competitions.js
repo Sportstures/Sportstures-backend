@@ -4,7 +4,7 @@ const pool = require('../../db/config');
 const validate = require('../middleware/validate');
 const { authenticate, optionalAuthenticate, requireRole, requireUser } = require('../middleware/auth');
 const { errorBody, teamSelect, teamJoins, mapTeam } = require('../utils/serializers');
-const { buildTable } = require('../utils/standings');
+const { buildTable, TIEBREAKERS, resolveRules } = require('../utils/standings');
 const { PROVINCES } = require('../utils/schools');
 const { AGE_GROUPS, ageGroupOf } = require('../utils/rankings');
 const { STATUSES, NATIONAL, describe, compare } = require('../utils/competitions');
@@ -15,9 +15,29 @@ const TIME_ZONE = 'Africa/Johannesburg';
 const REGIONS = [...PROVINCES, NATIONAL];
 
 const SELECT = `SELECT c.id, c.name, c.season, c.created_by, c.province, c.age_group, c.total_rounds,
+    c.points_win, c.points_draw, c.points_loss, c.tiebreakers,
     to_char(c.start_date, 'YYYY-MM-DD') AS start_date, to_char(c.end_date, 'YYYY-MM-DD') AS end_date,
     sp.id AS sport_id, sp.name AS sport_name
   FROM competitions c LEFT JOIN sports sp ON sp.id = c.sport_id`;
+
+// How this competition's table is decided. `tiebreakers` is always the order in use; `custom` says whether the
+// organiser chose it (false means the standard rules).
+function mapRules(r) {
+  const rules = tableRules(r);
+  return {
+    pointsWin: rules.points.win,
+    pointsDraw: rules.points.draw,
+    pointsLoss: rules.points.loss,
+    tiebreakers: rules.tiebreakers,
+    custom: Boolean(r.tiebreakers) || r.points_win !== 3 || r.points_draw !== 1 || r.points_loss !== 0,
+  };
+}
+
+// The rules buildTable needs, from a competition row.
+const tableRules = (r) => resolveRules({
+  points: { win: r.points_win, draw: r.points_draw, loss: r.points_loss },
+  tiebreakers: r.tiebreakers,
+});
 
 function mapCompetition(r) {
   return {
@@ -25,6 +45,7 @@ function mapCompetition(r) {
     name: r.name,
     season: r.season,
     sport: r.sport_id ? { id: r.sport_id, name: r.sport_name } : null,
+    rules: mapRules(r),
   };
 }
 
@@ -191,7 +212,8 @@ router.get(
           awayTeamId: r.away_team_id,
           homeScore: r.home_team_score,
           awayScore: r.away_team_score,
-        }))
+        })),
+        tableRules(comp)
       );
       res.json({ competition: mapCompetition(comp), standings: table });
     } catch (err) {
@@ -208,6 +230,11 @@ const detailRules = [
   body(['startDate', 'endDate']).optional({ values: 'null' })
     .isDate({ format: 'YYYY-MM-DD', strictMode: true }).withMessage('dates must be YYYY-MM-DD'),
   body('rounds').optional({ values: 'null' }).isInt({ min: 1, max: 500 }).withMessage('rounds must be 1 to 500').toInt(),
+  body(['pointsWin', 'pointsDraw', 'pointsLoss']).optional().isInt({ min: 0, max: 10 }).withMessage('points must be 0 to 10').toInt(),
+  body('tiebreakers').optional({ values: 'null' }).isArray({ min: 1, max: TIEBREAKERS.length })
+    .withMessage(`tiebreakers must be a list of ${TIEBREAKERS.join(', ')}`)
+    .bail().custom((list) => list.every((t) => TIEBREAKERS.includes(t)) && new Set(list).size === list.length)
+    .withMessage(`tiebreakers can use each of ${TIEBREAKERS.join(', ')} once`),
   body('endDate').optional({ values: 'null' }).custom((end, { req }) => {
     if (req.body.startDate && end < req.body.startDate) throw new Error('endDate must be on or after startDate');
     return true;
@@ -245,13 +272,15 @@ router.post(
   validate,
   async (req, res, next) => {
     try {
-      const { name, sportId, season, region, ageGroup, startDate, endDate, rounds } = req.body;
+      const { name, sportId, season, region, ageGroup, startDate, endDate, rounds, pointsWin, pointsDraw, pointsLoss, tiebreakers } = req.body;
       if (await unknownSport(sportId)) return res.status(400).json(errorBody('UNKNOWN_SPORT', 'Unknown sportId'));
       const inserted = await pool.query(
-        `INSERT INTO competitions (name, sport_id, season, created_by, province, age_group, start_date, end_date, total_rounds)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        `INSERT INTO competitions (name, sport_id, season, created_by, province, age_group, start_date, end_date, total_rounds,
+            points_win, points_draw, points_loss, tiebreakers)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, 3), COALESCE($11, 1), COALESCE($12, 0), $13) RETURNING id`,
         [name, sportId || null, season || null, req.user.id, region || null, ageGroup || null,
-          startDate || null, endDate || null, rounds || null]
+          startDate || null, endDate || null, rounds || null,
+          pointsWin ?? null, pointsDraw ?? null, pointsLoss ?? null, tiebreakers || null]
       );
       res.status(201).json({ competition: (await describeAll([await loadOne(inserted.rows[0].id)], req.user))[0] });
     } catch (err) {
@@ -266,6 +295,7 @@ router.post(
 const COLUMNS = {
   name: 'name', sportId: 'sport_id', season: 'season', region: 'province', ageGroup: 'age_group',
   startDate: 'start_date', endDate: 'end_date', rounds: 'total_rounds',
+  pointsWin: 'points_win', pointsDraw: 'points_draw', pointsLoss: 'points_loss', tiebreakers: 'tiebreakers',
 };
 router.patch(
   '/:id',

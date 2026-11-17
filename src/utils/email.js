@@ -4,6 +4,7 @@ const { crestAttachment } = require('../emails/layout');
 const { verificationCodeEmail } = require('../emails/verificationCode');
 const { accountNoticeEmail } = require('../emails/accountNotice');
 const { supportMessageEmail, supportReceiptEmail } = require('../emails/supportMessage');
+const { coachInvitationEmail } = require('../emails/coachInvitation');
 
 function createTransport() {
   const host = process.env.SMTP_HOST;
@@ -94,3 +95,9 @@ async function sendSupportReceipt(details) {
 module.exports = {
   canSendEmail, sendEmail, sendVerificationCode, sendAccountNotice, sendSupportMessage, sendSupportReceipt,
 };
+module.exports = { sendEmail, sendVerificationCode, sendAccountNotice };
+async function sendCoachInvitation(to, details) {
+  await sendEmail({ to, ...coachInvitationEmail(details) });
+}
+
+module.exports = { sendEmail, sendVerificationCode, sendCoachInvitation };

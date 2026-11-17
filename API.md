@@ -604,7 +604,8 @@ Response: `{ "competitionId": 3, "following": true }`.
 
 Body: `{ "name": "...", "sportId": 2, "season": "2026" }` (only `name` required), plus the optional card
 details `region` (a province or `National`), `ageGroup` (`U/14`, `U/16`, `U/19`, `Open`), `startDate`,
-`endDate` (YYYY-MM-DD) and `rounds` (1 to 500). Response `201`: `{ "competition": {...} }`, the full card.
+`endDate` (YYYY-MM-DD) and `rounds` (1 to 500), and the table rules `pointsWin`, `pointsDraw`, `pointsLoss`
+(0 to 10; default 3, 1, 0) and `tiebreakers` (see Table rules under standings). Response `201`: `{ "competition": {...} }`, the full card.
 `409 COMPETITION_EXISTS` if the name already exists (any case).
 
 ### PATCH /api/competitions/:id (the coach who created it, or admin)
@@ -724,9 +725,31 @@ before it has played (cancelled fixtures do not count).
 }
 ```
 
-- Points: win 3, draw 1, loss 0.
-- Order: points, then `difference` (`pointsFor` minus `pointsAgainst`), then `pointsFor`, then team name.
-  Teams level on all of those share a `position`.
+- Points: the competition's `pointsWin`, `pointsDraw` and `pointsLoss` (default 3, 1, 0).
+- Order: points first. Teams level on points are separated by the competition's `tiebreakers`, in order (see
+  below). Teams still level after every tiebreaker share a `position` and are listed by name.
+- Each row has `tiebreaker`: what separated it from the teams it was level with (`difference`, `for`,
+  `against`, `wins` or `head_to_head`), or `null` when its points were enough. The website can show this as
+  "Decided on head-to-head".
+- `competition.rules` says how the table is decided: `{ pointsWin, pointsDraw, pointsLoss, tiebreakers, custom }`.
+  `tiebreakers` is always the order in use; `custom` is false when the competition uses the standard rules.
+
+#### Table rules
+
+Each competition can set its own rules when it is created or edited (needs migration `013_standings_rules.sql`).
+`tiebreakers` is a list of up to five, each used once, applied in order to the teams still level:
+
+| Tiebreaker | Meaning |
+| --- | --- |
+| `difference` | higher `pointsFor` minus `pointsAgainst` first |
+| `for` | more scored first |
+| `against` | fewer conceded first |
+| `wins` | more wins first |
+| `head_to_head` | a mini table of only the matches between the tied teams: points, then difference, then scored |
+
+The standard order, used when `tiebreakers` is left out or `null`, is `["difference", "for", "head_to_head"]`.
+`PATCH` with `"tiebreakers": null` goes back to it. Invalid lists answer `400`. The schools table
+(`GET /api/results/standings`) always uses the standard rules.
 - `form` is the last five results, oldest first (`W`, `D` or `L`).
 - `404 NOT_FOUND` for an unknown competition. A competition with no fixtures returns `"standings": []`.
 
@@ -1154,6 +1177,33 @@ A match stays in `upcoming` until 4 hours after kick-off. Action items, most urg
 | `review_join_requests` | Players are waiting to join (`count`) | You approve or reject them |
 
 Cancelled matches never produce items.
+
+## Inviting coaches from other schools
+
+A coach can bring in a coach at another school two ways: **email** (the system sends an official invitation) or a **share link** (copy it into WhatsApp, social media or an email). Both end at the website's coach signup page, `{WEBSITE_URL}/signup?invite=<code>`. Needs migration `012_invitations.sql`. Set `WEBSITE_URL` on the server (for example `https://sportstures.co.za`); it defaults to `http://localhost:3000`.
+
+### POST /api/invitations (coaches and admins)
+Send `{ "email": "head@otherschool.co.za" }` to email an invitation (`201`, or `200` if that address was already invited: the same invitation is sent again with a fresh 14-day expiry). Send `{}` to get your **share link** (one per coach, valid 90 days, reused; `201` the first time, `200` after). Both return:
+
+```json
+{ "invitation": { "id": 4, "kind": "email", "email": "head@otherschool.co.za", "status": "pending",
+  "link": "https://.../signup?invite=Xk3...", "code": "Xk3...", "joined": 0, "emailSent": true,
+  "createdAt": "...", "expiresAt": "..." } }
+```
+
+Errors: `400 INVITE_SELF`, `409 ALREADY_REGISTERED` (that address already has an account), `429 INVITE_LIMIT` (20 emails a day, set `INVITE_EMAILS_PER_DAY`), `502 EMAIL_FAILED` (nothing is saved; offer the share link instead).
+
+### GET /api/invitations (coaches and admins)
+`{ "invitations": [...], "joined": 3 }`. `status` is `pending`, `accepted` (email invitations once that coach registers), `expired` or `cancelled`. `joined` counts the coaches who registered through that invitation; one share link can bring in many.
+
+### DELETE /api/invitations/:id (the inviter)
+`204`. The link stops working. Coaches who already joined are not affected.
+
+### GET /api/invitations/:code (public)
+For the signup page: `{ "valid": true, "inviterName": "Sipho Williams", "schoolName": "Jeppe High", "email": null }` (`email` is set for email invitations, so the form can fill it in). `404 INVITATION_INVALID` when the code is unknown, cancelled or expired.
+
+### Registering with an invitation
+Add `"inviteCode": "<code>"` to `POST /api/auth/register/coach`. A wrong or expired code never blocks signup; it is just ignored.
 
 ## Protecting a new route (for backend developers)
 

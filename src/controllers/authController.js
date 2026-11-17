@@ -107,7 +107,7 @@ async function registerCoach(req, res, next) {
   try {
     const {
       email, password, firstName, lastName, dateOfBirth, gender, school,
-      coachingRole, experience, team, schoolProvince, schoolTown,
+      coachingRole, experience, team, schoolProvince, schoolTown, inviteCode,
     } = req.body;
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     client = await pool.connect();
@@ -130,6 +130,16 @@ async function registerCoach(req, res, next) {
       [email, passwordHash, firstName, lastName, dateOfBirth, gender, roleRows[0].id]
     );
     const userId = userRows[0].id;
+
+    // Signed up from an invitation link: remember who invited them. A bad or expired code never blocks signup.
+    if (inviteCode) {
+      await client.query(
+        `UPDATE users SET invitation_id = (
+           SELECT id FROM invitations WHERE code = $2 AND revoked_at IS NULL AND expires_at > NOW())
+         WHERE id = $1`,
+        [userId, String(inviteCode).slice(0, 64)]
+      );
+    }
 
     await client.query(
       `INSERT INTO coaches (user_id, school_id, team_name, team_level, coaching_role, experience)
