@@ -2,16 +2,15 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const { contactEmail } = require('./utils/contacts');
+const { trustProxySetting } = require('./utils/trustProxy');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Behind a host's proxy (Render and most others), set TRUST_PROXY=1 so req.ip is the visitor's
-// address, not the proxy's. Without it the login rate limits would count everyone as one visitor.
-if (process.env.TRUST_PROXY) {
-  const hops = Number(process.env.TRUST_PROXY);
-  app.set('trust proxy', Number.isInteger(hops) ? hops : process.env.TRUST_PROXY);
-}
+// Behind a host's proxy, req.ip must be the visitor's address, not the proxy's, or the rate limits would
+// count everyone as one visitor. TRUST_PROXY sets it; on Render it is 1 automatically (see trustProxy.js).
+const trustProxy = trustProxySetting();
+if (trustProxy !== undefined) app.set('trust proxy', trustProxy);
 
 // Middleware
 app.use(cors());

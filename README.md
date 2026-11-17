@@ -165,7 +165,8 @@ Notes:
 
 - On the free plan the service sleeps after 15 minutes without traffic; the next request takes
   up to a minute to wake it. Choose a paid plan in `render.yaml` (or the dashboard) before launch.
-- `TRUST_PROXY=1` is set so the login rate limits see each visitor's real address behind Render's proxy.
+- `TRUST_PROXY=1` is set so the rate limits see each visitor's real address behind Render's proxy. On Render it
+  also defaults to `1` when unset (Render sets `RENDER=true`), so a service made by hand in the dashboard works too.
 - To change a secret later, edit it under the service's **Environment** tab; never commit it.
 
 ## Environment variables
@@ -181,7 +182,7 @@ Notes:
 | `DB_NAME` | `sportstures` | Database name |
 | `DATABASE_URL` | *(unset locally)* | One connection string instead of the `DB_*` settings, e.g. Render's. When set, it wins |
 | `DB_SSL` | *(automatic)* | `true`/`false` forces SSL on or off. Default: on for `*.render.com` hosts only |
-| `TRUST_PROXY` | *(unset locally)* | Set to `1` behind a host's proxy (Render) so rate limits see real visitor addresses |
+| `TRUST_PROXY` | *(unset locally)* | Proxies in front of the app, so rate limits see real visitor addresses. Defaults to `1` on Render; set it on other hosts |
 | `JWT_SECRET` | *(96-character random hex)* | Signs access tokens. Use a different one in each environment |
 | `JWT_ACCESS_EXPIRES_IN` | `15m` | Access token lifetime |
 | `JWT_REFRESH_EXPIRES_DAYS` | `30` | Refresh token lifetime in days |
