@@ -19,8 +19,10 @@ process.env.OTP_RATE_LIMIT_MAX = '10000';
 delete process.env.SMTP_HOST;
 delete process.env.SMTP_FROM;
 // Tests always use the local throwaway database below, never a DATABASE_URL (such as Render's).
-delete process.env.DATABASE_URL;
-delete process.env.DB_SSL;
+// Set to empty, not deleted: the app calls dotenv again when it loads, and dotenv refills any
+// variable that is missing (but never overrides one that exists, even an empty one).
+process.env.DATABASE_URL = '';
+process.env.DB_SSL = '';
 
 const { Client, Pool } = require('pg');
 
@@ -71,7 +73,34 @@ async function startTestApp() {
     },
   };
 
+  // Replace Cloudinary with a fake that records uploads, so tests never need the real account.
+  const uploads = [];
+  const deleted = [];
+  const storageModule = require.resolve(path.join(root, 'src/utils/storage.js'));
+  require.cache[storageModule] = {
+    id: storageModule,
+    filename: storageModule,
+    loaded: true,
+    exports: {
+      isConfigured: () => true,
+      uploadAvatar: async (buffer, userId) => {
+        uploads.push({ userId, bytes: buffer.length });
+        const publicId = `sportstures/avatars/user_${userId}`;
+        return { url: `https://res.cloudinary.com/test/image/upload/v${uploads.length}/${publicId}.jpg`, publicId };
+      },
+      deleteImage: async (publicId) => { deleted.push(publicId); },
+    },
+  };
+
   const app = require(path.join(root, 'src/server.js'));
+
+  // Safety check: stop before any test runs if the app is connected to anything but the throwaway database.
+  const appPool = require(path.join(root, 'db/config.js'));
+  const { rows: [conn] } = await appPool.query('SELECT current_database() AS db');
+  if (conn.db !== dbName) {
+    throw new Error(`Tests stopped: the app is connected to "${conn.db}", not the test database "${dbName}"`);
+  }
+
   const server = await new Promise((resolve) => { const s = app.listen(0, () => resolve(s)); });
   const origin = `http://localhost:${server.address().port}`;
 
@@ -103,7 +132,7 @@ async function startTestApp() {
     await admin.end();
   }
 
-  return { api, pool: setupPool, lastCode, sentEmails, stop };
+  return { api, origin, pool: setupPool, lastCode, sentEmails, uploads, deleted, stop };
 }
 
 // Test data builders matching the mobile signup screens.

@@ -261,6 +261,7 @@ async function withProfile(user) {
     firstName: user.first_name,
     lastName: user.last_name,
     dateOfBirth: user.date_of_birth,
+    avatarUrl: user.avatar_url || null,
     createdAt: user.created_at,
     profile,
     ...(user.role === 'coach' ? { team: profile ? profile.team : null } : {}),
