@@ -5,6 +5,7 @@ const validate = require('../middleware/validate');
 const { authenticate, optionalAuthenticate, requireUser, requireRole } = require('../middleware/auth');
 const { errorBody, FIXTURE_SELECT, FIXTURE_FROM, mapFixture } = require('../utils/serializers');
 const { FEED_CONDITION } = require('../utils/favorites');
+const notify = require('../utils/notifications');
 
 const router = express.Router();
 
@@ -157,6 +158,7 @@ router.post(
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
         [homeTeamId, awayTeamId, matchDate, venue || null, competitionId || null, matchType || 'league']
       );
+      await notify.fixtureScheduled(inserted.rows[0].id, req.user.id);
       res.status(201).json({ fixture: mapFixture(await loadFixture(inserted.rows[0].id)) });
     } catch (err) {
       next(err);
@@ -211,6 +213,7 @@ router.patch(
         sets.push('updated_at = CURRENT_TIMESTAMP');
         params.push(req.params.id);
         await pool.query(`UPDATE fixtures SET ${sets.join(', ')} WHERE id = $${params.length}`, params);
+        await notify.fixtureChanged(mapFixture(row), req.user.id);
       }
       res.json({ fixture: mapFixture(await loadFixture(req.params.id)) });
     } catch (err) {
@@ -260,6 +263,7 @@ router.put(
       await client.query("UPDATE fixtures SET status = 'finished', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [row.id]);
       await client.query('COMMIT');
 
+      await notify.matchResult(row.id, req.user.id, { corrected: row.status === 'finished' });
       res.json({ fixture: mapFixture(await loadFixture(row.id)) });
     } catch (err) {
       if (client) await client.query('ROLLBACK').catch(() => {});

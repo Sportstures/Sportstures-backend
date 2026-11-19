@@ -8,6 +8,7 @@ const pool = require('../../db/config');
 const validate = require('../middleware/validate');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { errorBody } = require('../utils/serializers');
+const notify = require('../utils/notifications');
 
 const router = express.Router();
 
@@ -220,6 +221,7 @@ router.post(
         if (err.code === '23505') return res.status(409).json(jerseyTaken());
         throw err;
       }
+      await notify.membership(existing.rows[0] ? 'join_approved' : 'squad_added', team.id, target.id);
       const member = await loadMember(team.id, target.id);
       res.status(existing.rows[0] ? 200 : 201).json({ member: mapMember(member) });
     } catch (err) {
@@ -266,6 +268,9 @@ router.patch(
           throw err;
         }
       }
+      if (req.body.status === 'active' && member.status !== 'active') {
+        await notify.membership('join_approved', team.id, req.params.userId);
+      }
       res.json({ member: mapMember(await loadMember(team.id, req.params.userId)) });
     } catch (err) {
       next(err);
@@ -287,8 +292,11 @@ router.delete(
       if (!isTeamManager(req.user, team)) {
         return res.status(403).json(errorBody('FORBIDDEN', 'You can only manage the roster of your own team'));
       }
-      const removed = await pool.query('DELETE FROM team_members WHERE team_id = $1 AND user_id = $2', [team.id, req.params.userId]);
+      const removed = await pool.query(
+        'DELETE FROM team_members WHERE team_id = $1 AND user_id = $2 RETURNING status', [team.id, req.params.userId]
+      );
       if (!removed.rowCount) return res.status(404).json(errorBody('NOT_FOUND', 'That learner is not on this team'));
+      await notify.membership(removed.rows[0].status === 'pending' ? 'join_declined' : 'squad_removed', team.id, req.params.userId);
       res.json({ message: 'Removed from the team' });
     } catch (err) {
       next(err);
