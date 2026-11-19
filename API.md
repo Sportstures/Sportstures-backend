@@ -1131,6 +1131,84 @@ Follow or unfollow a school (the Follow button on the school page). Every match 
 home or away, then shows in the feed. Response: `{ "schoolId": 3, "following": true }`. Both are safe to repeat.
 `404 NOT_FOUND` for an unknown school. List them with `GET /api/schools?following=true` or `GET /api/me/favorites`.
 
+## Notifications
+
+The learner's in-app inbox (the bell). All need `Authorization: Bearer <accessToken>`. There is no push to
+phones: poll `GET /api/me/notifications/unread-count` for the badge (for example when the app opens or comes back
+to the foreground, and every minute or two while it is open).
+
+### What creates a notification
+
+Only learners receive notifications, and never for something they did themselves.
+
+| `type` | `category` (setting) | When | Who gets it |
+|---|---|---|---|
+| `match_result` | `matchResults` | A result is recorded (title starts "Full time"), or corrected ("Result corrected") | The match's audience (below) |
+| `fixture_scheduled` | `fixtureChanges` | A fixture is created | The match's audience |
+| `fixture_rescheduled` | `fixtureChanges` | Date, time or venue changes, or a postponed match is back on | The match's audience |
+| `fixture_postponed` | `fixtureChanges` | Status set to postponed | The match's audience |
+| `fixture_cancelled` | `fixtureChanges` | Status set to cancelled | The match's audience |
+| `join_approved` | `teamMembership` | The coach approves their join request | That learner |
+| `join_declined` | `teamMembership` | The coach declines their join request | That learner |
+| `squad_added` | `teamMembership` | The coach adds them to a team | That learner |
+| `squad_removed` | `teamMembership` | The coach removes them from a team | That learner |
+| `lineup_selected` | `lineupSelection` | Named as a starter or on the bench (`data.role`). A resubmitted lineup only tells players who are new to it or moved between starting and the bench | That learner |
+
+A match's audience: active players of either team, and learners who favourite either team, follow either school
+or follow the competition. Favourite **sports** alone don't send notifications (that would be every match).
+
+### The notification object
+
+```json
+{ "id": 812, "type": "match_result", "category": "matchResults",
+  "title": "Full time: Protea Glen FC 2 - 1 Riverside FC", "body": "Gauteng Schools Football League",
+  "data": { "fixtureId": 140, "homeTeamId": 3, "awayTeamId": 7, "competitionId": 1 },
+  "read": false, "readAt": null, "createdAt": "2026-11-19T13:44:16.674Z" }
+```
+
+- Show `title` in bold and `body` underneath; both are ready to display. Times in them are South African.
+- Use `data` to open the right screen: `fixtureId` for match notifications (the match page), `teamId` for team ones.
+  Lineup ones have both, plus `role` (`starter` or `bench`).
+
+### GET /api/me/notifications?unread=true&limit=&offset=
+
+Newest first. `limit` 1 to 100 (default 20). `unread=true` lists only unread ones.
+
+```json
+{ "notifications": [...], "unreadCount": 3, "total": 41, "limit": 20, "offset": 0, "hasMore": true }
+```
+
+`unreadCount` is for the whole inbox; `total` counts what this list matches.
+
+### GET /api/me/notifications/unread-count
+
+`{ "unreadCount": 3 }`, for the badge.
+
+### PUT /api/me/notifications/:id/read and DELETE /api/me/notifications/:id/read
+
+Mark one read (when tapped) or unread again. Response: `{ "notification": {...}, "unreadCount": 2 }`.
+`404 NOT_FOUND` if it isn't yours or doesn't exist.
+
+### POST /api/me/notifications/read-all
+
+Mark everything read. Response: `{ "marked": 3, "unreadCount": 0 }`.
+
+### DELETE /api/me/notifications/:id
+
+Remove one from the inbox. Response: `{ "deleted": true, "unreadCount": 2 }`, or `404 NOT_FOUND`.
+
+### GET /api/me/notifications/settings and PUT /api/me/notifications/settings
+
+The toggles on the Notification settings screen. Everything is on until changed.
+
+```json
+{ "settings": { "matchResults": true, "fixtureChanges": true, "teamMembership": true, "lineupSelection": true } }
+```
+
+`PUT` takes any of the four as `true` or `false`; only those sent change. Response: the same as `GET`.
+`400 NOTHING_TO_UPDATE` with none of them; `400 VALIDATION_ERROR` for anything but `true`/`false`.
+Turning a setting off stops new notifications of that kind; ones already in the inbox stay.
+
 ## Match lineups
 
 All need `Authorization: Bearer <accessToken>`. Each of the two teams in a fixture submits its own lineup: the

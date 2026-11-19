@@ -9,6 +9,7 @@ const pool = require('../../db/config');
 const validate = require('../middleware/validate');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { errorBody, FIXTURE_SELECT, FIXTURE_FROM } = require('../utils/serializers');
+const notify = require('../utils/notifications');
 
 const router = express.Router();
 
@@ -157,6 +158,7 @@ router.put(
          RETURNING id`,
         [f.id, teamId, req.user.id, req.body.formation || null]);
       const lineupId = head.rows[0].id;
+      const previous = await client.query('SELECT user_id, role FROM fixture_lineup_players WHERE lineup_id = $1', [lineupId]);
       await client.query('DELETE FROM fixture_lineup_players WHERE lineup_id = $1', [lineupId]);
       for (const [i, p] of all.entries()) {
         const m = byUser.get(p.userId);
@@ -166,6 +168,7 @@ router.put(
           [lineupId, p.userId, p.role, m.jersey_number, p.position || m.position || null, i]);
       }
       await client.query('COMMIT');
+      await notify.lineupSelected(f.id, teamId, all, previous.rows.map((p) => ({ userId: p.user_id, role: p.role })));
       res.json({ lineup: await loadLineup(f.id, teamId) });
     } catch (err) {
       if (client) await client.query('ROLLBACK').catch(() => {});
