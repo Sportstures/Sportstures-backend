@@ -497,13 +497,14 @@ Lists accept `limit` (default 50, max 100) and `offset`.
 ### Team object
 
 ```json
-{ "id": 4, "name": "Basketball Boys", "level": "Varsity", "genderCategory": "boys",
+{ "id": 4, "name": "Basketball Boys", "level": "Varsity", "genderCategory": "boys", "logoUrl": null,
   "sport": { "id": 2, "name": "Basketball" },
   "school": { "id": 1, "name": "Jeppe High", "province": "Gauteng", "town": "Sandton" },
   "coach": { "id": 7, "name": "Sipho Williams" }, "description": null, "location": null, "foundedYear": null,
   "playerCount": 12, "ageGroup": "Open", "favorite": false }
 ```
 
+`logoUrl` is `null` until the coach uploads a logo (see below); it appears wherever a team does (fixtures, results, standings, rankings, the coach dashboard). Show the team's initials when it is `null`.
 `school.province` and `school.town` are `null` until someone sets them. `coach.id` is the coach's **user id**. `sport`, `school` and `coach` are `null` when not set.
 `ageGroup` is worked out from `level`:
 - `u13`–`u14` → `U/14`
@@ -550,6 +551,22 @@ Only `name` is required. A coach's new team is assigned to that coach, and the s
 ### PATCH /api/teams/:id (the team's coach, or admin)
 
 Send only the fields to change; send `null` to clear one. `403 FORBIDDEN` for another coach's team.
+
+### PUT /api/teams/:id/logo (the team's coach, or admin)
+
+Upload or replace the team's logo. Same upload as the profile photo: `multipart/form-data` with one file in the
+field **`photo`** (JPEG, PNG, WebP or HEIC, up to 5 MB). The logo is shrunk to fit inside 512×512 and stored as
+a PNG on Cloudinary. It is never cropped, so crests keep their shape and any transparent background. A new
+upload replaces the old one.
+
+Response `200`: `{ "logoUrl": "https://res.cloudinary.com/.../team-logos/team_4.png", "team": { ... } }`
+
+Errors: `401`, `403 FORBIDDEN` (not this team's coach), `404 NOT_FOUND`, `400 NO_FILE`, `400 INVALID_UPLOAD`,
+`400 INVALID_IMAGE`, `413 FILE_TOO_LARGE`, `502 UPLOAD_FAILED`, `503 STORAGE_UNAVAILABLE`: the same as the avatar upload.
+
+### DELETE /api/teams/:id/logo (the team's coach, or admin)
+
+Remove the logo. Response `200`: `{ "logoUrl": null, "team": { ... } }`.
 
 ### GET /api/competitions
 

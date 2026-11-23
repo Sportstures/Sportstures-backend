@@ -48,9 +48,29 @@ function uploadAvatar(buffer, userId) {
   });
 }
 
+// Uploads a team logo, shrunk to fit inside 512px (never cropped, so a crest keeps its shape and any
+// transparent background). Each team has one fixed public id, so a new logo replaces the old one.
+function uploadTeamLogo(buffer, teamId) {
+  return new Promise((resolve, reject) => {
+    const stream = client().uploader.upload_stream(
+      {
+        folder: folder('team-logos'),
+        public_id: `team_${teamId}`,
+        overwrite: true,
+        invalidate: true,
+        resource_type: 'image',
+        format: 'png',
+        transformation: [{ width: 512, height: 512, crop: 'limit' }],
+      },
+      (err, result) => (err ? reject(err) : resolve({ url: result.secure_url, publicId: result.public_id }))
+    );
+    stream.end(buffer);
+  });
+}
+
 async function deleteImage(publicId) {
   if (!publicId) return;
   await client().uploader.destroy(publicId, { invalidate: true });
 }
 
-module.exports = { isConfigured, uploadAvatar, deleteImage };
+module.exports = { isConfigured, uploadAvatar, uploadTeamLogo, deleteImage };

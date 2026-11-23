@@ -95,6 +95,7 @@ async function startTestApp() {
   // Replace Cloudinary with a fake that records uploads, so tests never need the real account.
   const uploads = [];
   const deleted = [];
+  const teamLogos = [];
   const storageModule = require.resolve(path.join(root, 'src/utils/storage.js'));
   require.cache[storageModule] = {
     id: storageModule,
@@ -106,6 +107,11 @@ async function startTestApp() {
         uploads.push({ userId, bytes: buffer.length });
         const publicId = `sportstures/avatars/user_${userId}`;
         return { url: `https://res.cloudinary.com/test/image/upload/v${uploads.length}/${publicId}.jpg`, publicId };
+      },
+      uploadTeamLogo: async (buffer, teamId) => {
+        teamLogos.push({ teamId, bytes: buffer.length });
+        const publicId = `sportstures/team-logos/team_${teamId}`;
+        return { url: `https://res.cloudinary.com/test/image/upload/v${teamLogos.length}/${publicId}.png`, publicId };
       },
       deleteImage: async (publicId) => { deleted.push(publicId); },
     },
@@ -153,7 +159,7 @@ async function startTestApp() {
 
   return {
     api, origin, pool: setupPool, lastCode, sentEmails, notices, supportEmails, mail, sentInvites, control,
-    uploads, deleted, stop,
+    uploads, deleted, teamLogos, stop,
   };
 }
 

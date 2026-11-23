@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../../db/config');
 const { authenticate } = require('../middleware/auth');
-const multer = require('multer');
+const { receivePhoto } = require('../middleware/photoUpload');
 const {
   teamSelect, teamJoins, mapTeam, errorBody, FULL_TEAM_SELECT, mapFullTeam,
 } = require('../utils/serializers');
@@ -108,23 +108,6 @@ router.get('/school-sports', authenticate, async (req, res, next) => {
     next(err);
   }
 });
-
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
-
-// Keeps the upload in memory (it goes straight on to Cloudinary) and turns multer's errors into ours.
-function receivePhoto(req, res, next) {
-  multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_AVATAR_BYTES, files: 1 } })
-    .single('photo')(req, res, (err) => {
-      if (!err) return next();
-      if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(413).json(errorBody('FILE_TOO_LARGE', 'The photo must be 5 MB or smaller'));
-      }
-      if (err instanceof multer.MulterError) {
-        return res.status(400).json(errorBody('INVALID_UPLOAD', 'Send one image in a form field named "photo"'));
-      }
-      return next(err);
-    });
-}
 
 // PUT /api/me/avatar: upload or replace my profile photo (multipart/form-data, field "photo").
 router.put('/avatar', authenticate, receivePhoto, async (req, res, next) => {

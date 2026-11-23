@@ -9,7 +9,7 @@ function errorBody(code, message) {
 // Needs the joins from teamJoins(alias, p).
 function teamSelect(alias, p) {
   return `${alias}.id AS ${p}_id, ${alias}.name AS ${p}_name, ${alias}.level AS ${p}_level,
-    ${alias}.gender_category AS ${p}_gender_category,
+    ${alias}.gender_category AS ${p}_gender_category, ${alias}.logo_url AS ${p}_logo_url,
     ${p}_sp.id AS ${p}_sport_id, ${p}_sp.name AS ${p}_sport_name,
     ${p}_sc.id AS ${p}_school_id, ${p}_sc.name AS ${p}_school_name,
     ${p}_sc.province AS ${p}_school_province, ${p}_sc.town AS ${p}_school_town`;
@@ -26,6 +26,7 @@ function mapTeam(row, p) {
     name: row[`${p}_name`],
     level: row[`${p}_level`],
     genderCategory: row[`${p}_gender_category`],
+    logoUrl: row[`${p}_logo_url`] || null,
     sport: row[`${p}_sport_id`] ? { id: row[`${p}_sport_id`], name: row[`${p}_sport_name`] } : null,
     school: row[`${p}_school_id`]
       ? {
