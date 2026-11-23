@@ -7,6 +7,9 @@ const { errorBody, FULL_TEAM_SELECT: TEAM_SELECT, mapFullTeam } = require('../ut
 const { findOrCreateSchool } = require('../utils/schools');
 const { teamRecord } = require('../utils/standings');
 const { withFavorites } = require('../utils/favorites');
+const storage = require('../utils/storage');
+const { imageType } = require('../utils/images');
+const { receivePhoto } = require('../middleware/photoUpload');
 
 const router = express.Router();
 
@@ -198,6 +201,65 @@ router.patch(
     }
   }
 );
+
+// PUT /api/teams/:id/logo (the team's coach, or admin): upload or replace the team's logo
+// (multipart/form-data, field "photo", an image up to 5 MB).
+router.put('/:id/logo', authenticate, requireRole('coach', 'admin'), [idParam], validate, receivePhoto, async (req, res, next) => {
+  try {
+    const team = await loadTeam(req.params.id);
+    if (!team) return res.status(404).json(errorBody('NOT_FOUND', 'Team not found'));
+    if (!canManage(req.user, team)) {
+      return res.status(403).json(errorBody('FORBIDDEN', 'You can only change the logo of your own teams'));
+    }
+    if (!storage.isConfigured()) {
+      return res.status(503).json(errorBody('STORAGE_UNAVAILABLE', 'Image uploads are not set up on this server'));
+    }
+    if (!req.file) return res.status(400).json(errorBody('NO_FILE', 'Send the image in a form field named "photo"'));
+    if (!imageType(req.file.buffer)) {
+      return res.status(400).json(errorBody('INVALID_IMAGE', 'The logo must be a JPEG, PNG, WebP or HEIC image'));
+    }
+
+    let uploaded;
+    try {
+      uploaded = await storage.uploadTeamLogo(req.file.buffer, team.t_id);
+    } catch (err) {
+      console.error('Team logo upload failed:', err.message);
+      return res.status(502).json(errorBody('UPLOAD_FAILED', 'The logo could not be saved. Please try again'));
+    }
+
+    await pool.query(
+      'UPDATE teams SET logo_url = $1, logo_public_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
+      [uploaded.url, uploaded.publicId, team.t_id]
+    );
+    res.json({ logoUrl: uploaded.url, team: mapFullTeam(await loadTeam(team.t_id)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/teams/:id/logo (the team's coach, or admin): remove the team's logo.
+router.delete('/:id/logo', authenticate, requireRole('coach', 'admin'), [idParam], validate, async (req, res, next) => {
+  try {
+    const team = await loadTeam(req.params.id);
+    if (!team) return res.status(404).json(errorBody('NOT_FOUND', 'Team not found'));
+    if (!canManage(req.user, team)) {
+      return res.status(403).json(errorBody('FORBIDDEN', 'You can only change the logo of your own teams'));
+    }
+    const { rows: [row] } = await pool.query('SELECT logo_public_id FROM teams WHERE id = $1', [team.t_id]);
+    if (row && row.logo_public_id && storage.isConfigured()) {
+      try {
+        await storage.deleteImage(row.logo_public_id);
+      } catch (err) {
+        // The logo is unlinked either way; a leftover file in Cloudinary is harmless.
+        console.error('Team logo delete failed:', err.message);
+      }
+    }
+    await pool.query('UPDATE teams SET logo_url = NULL, logo_public_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [team.t_id]);
+    res.json({ logoUrl: null, team: mapFullTeam(await loadTeam(team.t_id)) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // GET /api/teams/:id/record?competitionId=: win/loss record, win rate, averages and recent form,
 // worked out from the team's finished fixtures. Feeds the season summary and the coach dashboard.
