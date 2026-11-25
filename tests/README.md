@@ -29,6 +29,7 @@ the verification codes directly.
 | `public-reads.test.js` | Which routes need no login, and which stay private |
 | `schools.test.js` | School province and town, the schools endpoints, who can edit them |
 | `seed-demo.test.js` | The demo data script: contents, repeatable, reset leaves real data alone |
+| `coach-fixture-management.test.js` | Either coach edits, postpones and cancels a fixture; the other coach is told; each sets their own lineup |
 | `live-scoring.test.js` | Starting a match, adding goals, the other coach confirming or disputing, full time, permissions |
 | `match-invitations.test.js` | Inviting another school's team to a match: accept creates the fixture, decline, withdraw, expiry, permissions, notifications |
 | `coach-dashboard.test.js` | The coach home summary: squad, record, next match, action items |

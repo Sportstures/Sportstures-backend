@@ -21,9 +21,14 @@ async function loadFixture(id) {
   return rows[0];
 }
 
-// Admins can manage any fixture; a coach can manage fixtures for their own (home) team.
+// Admins can manage any fixture; a coach can record results for fixtures of their own (home) team.
 function canManage(user, row) {
   return user.role === 'admin' || (user.role === 'coach' && row.h_coach_user_id === user.id);
+}
+
+// Editing, postponing and cancelling: either team's coach (both agreed to the match), or an admin.
+function canEdit(user, row) {
+  return canManage(user, row) || (user.role === 'coach' && row.a_coach_user_id === user.id);
 }
 
 async function checkReferences({ competitionId }) {
@@ -168,6 +173,7 @@ router.post(
 );
 
 // PATCH /api/fixtures/:id: edit details, postpone or cancel. Only the fields sent are changed.
+// Either team's coach (or an admin); the other team's coach is notified, as are players and followers.
 router.patch(
   '/:id',
   authenticate,
@@ -187,7 +193,7 @@ router.patch(
     try {
       const row = await loadFixture(req.params.id);
       if (!row) return res.status(404).json(errorBody('NOT_FOUND', 'Fixture not found'));
-      if (!canManage(req.user, row)) {
+      if (!canEdit(req.user, row)) {
         return res.status(403).json(errorBody('FORBIDDEN', 'You can only edit fixtures for a team you coach'));
       }
       if (row.status === 'finished' || row.status === 'live') {
