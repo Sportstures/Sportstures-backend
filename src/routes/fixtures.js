@@ -10,7 +10,8 @@ const notify = require('../utils/notifications');
 const router = express.Router();
 
 const MATCH_TYPES = ['league', 'semifinal', 'championship', 'friendly'];
-// Coaches can only schedule, postpone or cancel. 'live' and 'finished' come from match scoring.
+// Coaches can only schedule, postpone or cancel. 'live' and 'finished' come from match scoring
+// (POST /:id/start and /:id/finish in liveScoring.js, or PUT /:id/result).
 const EDITABLE_STATUSES = ['scheduled', 'postponed', 'cancelled'];
 
 const idParam = param('id').isInt({ min: 1 }).withMessage('id must be a number').toInt();
@@ -244,6 +245,10 @@ router.put(
       }
       if (row.status === 'cancelled' || row.status === 'postponed') {
         return res.status(409).json(errorBody('FIXTURE_NOT_PLAYABLE', `A ${row.status} fixture cannot have a result`));
+      }
+      // A live match gets its result from its confirmed goals: POST /api/fixtures/:id/finish.
+      if (row.status === 'live') {
+        return res.status(409).json(errorBody('MATCH_LIVE', 'This match is being scored live. Finish it with POST /api/fixtures/:id/finish'));
       }
       if (new Date(row.match_date) > new Date()) {
         return res.status(409).json(errorBody('FIXTURE_NOT_STARTED', 'The match has not been played yet'));

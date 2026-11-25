@@ -1,4 +1,5 @@
-// Learner notifications: the in-app inbox (GET /api/me/notifications).
+// The in-app notifications inbox (GET /api/me/notifications). Learners get match, team and lineup
+// news; coaches get match invitations from other schools.
 //
 // Routes call the notify* functions after their change is saved. Those never throw: a failed
 // notification is logged and the request still succeeds.
@@ -17,6 +18,18 @@ const CATEGORIES = {
     types: ['join_approved', 'join_declined', 'squad_added', 'squad_removed'],
   },
   lineupSelection: { column: 'lineup_selection', types: ['lineup_selected'] },
+  // For coaches: another school invites their team to a match, or answers their invitation.
+  matchInvitations: {
+    column: 'match_invitations',
+    roles: ['coach', 'admin'],
+    types: ['match_invitation_received', 'match_invitation_accepted', 'match_invitation_declined', 'match_invitation_cancelled'],
+  },
+  // For coaches during a live match: the other coach added a goal to confirm, or disputed one of theirs.
+  goalConfirmations: {
+    column: 'goal_confirmations',
+    roles: ['coach', 'admin'],
+    types: ['goal_confirmation_needed', 'goal_disputed'],
+  },
 };
 const CATEGORY_OF = Object.fromEntries(
   Object.entries(CATEGORIES).flatMap(([key, c]) => c.types.map((type) => [type, key]))
@@ -45,20 +58,21 @@ const fixtureData = (f) => ({
   competitionId: f.competition ? f.competition.id : null,
 });
 
-// Saves one notification for every listed learner whose setting for this type is on.
+// Saves one notification for every listed person whose setting for this type is on. Only learners
+// receive them, unless the category names other roles.
 // recipients is a SQL subquery returning user ids (with $1, $2... from recipientParams), or a list of ids.
 async function insert(type, { title, body, data }, recipients, recipientParams = [], exceptUserId = null) {
-  const column = CATEGORIES[CATEGORY_OF[type]].column;
+  const { column, roles = ['learner'] } = CATEGORIES[CATEGORY_OF[type]];
   const list = Array.isArray(recipients);
   const params = list ? [recipients] : [...recipientParams];
   const source = list ? 'SELECT unnest($1::int[])' : recipients;
-  params.push(type, title, body || null, JSON.stringify(data || {}), exceptUserId);
+  params.push(roles, type, title, body || null, JSON.stringify(data || {}), exceptUserId);
   const n = params.length;
   const { rowCount } = await pool.query(
     `INSERT INTO notifications (user_id, type, title, body, data)
      SELECT u.id, $${n - 4}, $${n - 3}, $${n - 2}, $${n - 1}::jsonb
        FROM users u
-       JOIN roles r ON r.id = u.role_id AND r.name = 'learner'
+       JOIN roles r ON r.id = u.role_id AND r.name = ANY($${n - 5}::text[])
        LEFT JOIN notification_settings ns ON ns.user_id = u.id
       WHERE u.id IN (${source})
         AND u.id IS DISTINCT FROM $${n}::int
@@ -169,6 +183,61 @@ const lineupSelected = safely(async (fixtureId, teamId, players, previous = []) 
   return sent;
 });
 
+// ------------------------------------------------------------------ match invitations (for coaches)
+
+const INVITATION_MESSAGES = {
+  match_invitation_received: (inv) => ({
+    title: `Match invitation: ${matchup(inv)}`,
+    body: [`From ${inv.inviterTeam.name}`, when(inv.matchDate), inv.venue].filter(Boolean).join(' · '),
+  }),
+  match_invitation_accepted: (inv) => ({
+    title: `Accepted: ${matchup(inv)}`,
+    body: [`${inv.invitedTeam.name} accepted`, when(inv.matchDate)].join(' · '),
+  }),
+  match_invitation_declined: (inv) => ({
+    title: `Declined: ${matchup(inv)}`,
+    body: [`${inv.invitedTeam.name} declined`, inv.responseMessage].filter(Boolean).join(' · '),
+  }),
+  match_invitation_cancelled: (inv) => ({
+    title: `Invitation withdrawn: ${matchup(inv)}`,
+    body: [`${inv.inviterTeam.name} withdrew it`, when(inv.matchDate)].join(' · '),
+  }),
+};
+
+// inv: a match invitation as the API returns it. Goes to one side's coach; the person who acted
+// never gets their own notification.
+const matchInvitation = safely(async (type, inv, recipientUserId, actorId) => {
+  if (!recipientUserId) return 0;
+  return insert(type, {
+    ...INVITATION_MESSAGES[type](inv),
+    data: { matchInvitationId: inv.id, fixtureId: inv.fixtureId, homeTeamId: inv.homeTeam.id, awayTeamId: inv.awayTeam.id },
+  }, [recipientUserId], [], actorId);
+});
+
+// ------------------------------------------------------------------ live scoring (for coaches)
+
+// goal: as GET /api/fixtures/:id/goals returns it; f: the fixture (from mapFixture).
+const GOAL_MESSAGES = {
+  goal_confirmation_needed: (goal, f) => ({
+    title: `Confirm goal: ${goal.team.name}${goal.minute !== null ? ` (${goal.minute}')` : ''}`,
+    body: [matchup(f), goal.player && goal.player.name, goal.points > 1 ? `${goal.points} points` : null].filter(Boolean).join(' · '),
+  }),
+  goal_disputed: (goal, f) => ({
+    title: `Goal disputed: ${goal.team.name}${goal.minute !== null ? ` (${goal.minute}')` : ''}`,
+    body: [matchup(f), goal.disputeReason].filter(Boolean).join(' · '),
+  }),
+};
+
+const goal = safely(async (type, goalObject, fixtureId, recipientUserId, actorId) => {
+  if (!recipientUserId) return 0;
+  const f = await loadFixture(fixtureId);
+  if (!f) return 0;
+  return insert(type, {
+    ...GOAL_MESSAGES[type](goalObject, f),
+    data: { ...fixtureData(f), goalId: goalObject.id, teamId: goalObject.team.id },
+  }, [recipientUserId], [], actorId);
+});
+
 module.exports = {
-  CATEGORIES, CATEGORY_OF, fixtureScheduled, fixtureChanged, matchResult, membership, lineupSelected,
+  CATEGORIES, CATEGORY_OF, fixtureScheduled, fixtureChanged, matchResult, membership, lineupSelected, matchInvitation, goal,
 };

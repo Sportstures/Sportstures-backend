@@ -656,7 +656,9 @@ would fall before the start date.
   "score": null,
   "winner": null,
   "reportFiled": false,
-  "lineupSubmitted": { "home": false, "away": false }
+  "lineupSubmitted": { "home": false, "away": false },
+  "pendingGoals": null,
+  "startedAt": null
 }
 ```
 
@@ -666,7 +668,10 @@ would fall before the start date.
 - `matchDate` is always UTC (ends in `Z`). Convert to local time in the app.
 - `status`: `scheduled`, `live`, `finished`, `cancelled` or `postponed`. The app's "Today" label is worked out from `matchDate`.
 - `matchType`: `league`, `semifinal`, `championship` or `friendly`.
-- `score` is `null` until a score exists, then `{ "home": 68, "away": 54 }`.
+- `score` is `null` until a score exists, then `{ "home": 68, "away": 54 }`. While a match is `live` it is the
+  live score: confirmed goals only (see Live scoring).
+- `pendingGoals` is set only while `live`: `{ "home": 1, "away": 0 }` goals waiting for the other coach to confirm.
+  Show them as "awaiting confirmation" next to the score. `startedAt` is when a coach started the match.
 - `competition` is `null` for friendlies. To know if a team played at home, compare its id with `homeTeam.id`.
 
 ### GET /api/fixtures
@@ -708,6 +713,95 @@ Edit `matchDate`, `venue`, `competitionId`, `matchType`, or set `status` to `sch
 (this is the app's "Cancel fixture" action). Send only what changes; `null` clears `competitionId`.
 `live` and `finished` cannot be set here; they come from match scoring.
 A live or finished fixture returns `409 FIXTURE_LOCKED`.
+
+## Live scoring
+
+Coaches score a match as it happens. Each goal one coach adds must be **confirmed by the other team's coach**
+before it counts. Needs migration `019_live_scoring.sql`.
+
+1. **Kick-off:** either coach starts the match: `POST /api/fixtures/:id/start`. The fixture becomes `live`.
+2. **Goals:** a coach adds a goal: `POST /api/fixtures/:id/goals`. It is `pending` and does **not** count yet.
+   The other coach gets a `goal_confirmation_needed` notification.
+3. **Confirm or dispute:** the other coach confirms it (it counts) or disputes it (it doesn't count, and the coach
+   who added it is notified). A disputed goal can still be confirmed later; the coach who added it can delete it.
+4. **Full time:** either coach finishes the match: `POST /api/fixtures/:id/finish`. Goals still `pending` are
+   confirmed automatically (`autoConfirmed: true`), so a coach who never answers (or a team with no coach on
+   Sportstures) doesn't hold up the result. **Disputed goals stay out.** The confirmed goals become the final
+   score, exactly like `PUT /api/fixtures/:id/result`, and followers get the result notification.
+
+Goals an admin adds are confirmed straight away, and an admin can confirm any goal. After full time, goals can no
+longer change; correct the score with `PUT /api/fixtures/:id/result` if needed. While a match is live,
+`PUT /api/fixtures/:id/result` returns `409 MATCH_LIVE`.
+
+All the write routes are for either team's coach or an admin (`403 FORBIDDEN` for anyone else) and, apart from
+`start`, need the match to be live: `409 MATCH_NOT_STARTED` before kick-off, `409 MATCH_NOT_LIVE` after it.
+
+### The goal object and the scoring response
+
+Every live scoring route (and `GET /api/fixtures/:id/goals`) answers with the whole match, so the screen can
+redraw from one response. Adding, confirming and disputing also include the `goal` that changed.
+
+```json
+{ "fixture": { ...the fixture... },
+  "goals": [
+    { "id": 31, "team": { "id": 4, "name": "Jeppe Football" }, "side": "home", "points": 1, "minute": 23,
+      "player": { "id": 77, "name": "Thabo Mokoena" }, "status": "pending", "autoConfirmed": false,
+      "addedBy": { "id": 85, "name": "Sipho Nkosi" }, "addedByTeamId": 4,
+      "confirmedAt": null, "disputeReason": null, "disputedAt": null, "createdAt": "...",
+      "canConfirm": false, "canDispute": false, "canDelete": true } ],
+  "score": { "home": 0, "away": 0 },
+  "pending": { "home": 1, "away": 0 },
+  "disputed": { "home": 0, "away": 0 } }
+```
+
+- `goals` are in match order (by `minute`, then the time they were added).
+- `status`: `pending` (waiting, not counted), `confirmed` (counted) or `disputed` (not counted).
+- `score` counts confirmed goals only, adding up `points`. `pending` and `disputed` count goals on each side.
+- `canConfirm`, `canDispute`, `canDelete`: which buttons to show the person asking. All are `false` for the side
+  that added a goal (except delete), for viewers who aren't coaches of either team, and after full time.
+
+There is no push: poll `GET /api/fixtures/:id/goals` every 10 to 20 seconds while the live screen is open.
+
+### POST /api/fixtures/:id/start
+
+Starts the match (from 60 minutes before kick-off). Response: the scoring response above.
+`409 TOO_EARLY` more than an hour before kick-off; `409 MATCH_NOT_LIVE` if it isn't `scheduled` (already live,
+finished, postponed or cancelled).
+
+### GET /api/fixtures/:id/goals
+
+Public, no login needed. Send the token anyway in the coach app, so the `can...` flags are filled in.
+
+### POST /api/fixtures/:id/goals
+
+```json
+{ "minute": 23, "playerId": 77, "points": 1, "teamId": 4 }
+```
+
+All optional. `teamId` is the team that scored: a coach's own team by default, or the other team (an own goal).
+Admins must send it. `playerId` must be an active player in that team's squad. `minute` is 0 to 200.
+`points` is 1 to 10 (default 1): use it for sports that score differently, for example 5 for a rugby try or 3 for
+a three-pointer. Response `201`. Errors: `400 TEAM_REQUIRED`, `400 TEAM_NOT_PLAYING`, `400 NOT_ON_TEAM`.
+
+### POST /api/fixtures/:id/goals/:goalId/confirm
+
+The other team's coach (or an admin). Works on `pending` and `disputed` goals.
+`409 ALREADY_CONFIRMED`; `403 FORBIDDEN` for the coach whose side added it.
+
+### POST /api/fixtures/:id/goals/:goalId/dispute
+
+`{ "reason": "Offside" }` (optional, up to 500 characters). The other team's coach (or an admin), `pending` goals
+only (`409 GOAL_NOT_PENDING`). The coach who added it gets a `goal_disputed` notification with the reason.
+
+### DELETE /api/fixtures/:id/goals/:goalId
+
+The coach who added the goal takes it back (a mistake, or after a dispute), or an admin. Response: the scoring
+response without the goal. `404 GOAL_NOT_FOUND`.
+
+### POST /api/fixtures/:id/finish
+
+Full time, as described above. Response: the scoring response, with `fixture.status` `finished` and the final
+`score` and `winner`.
 
 ## Results, standings and reports
 
@@ -1150,13 +1244,14 @@ home or away, then shows in the feed. Response: `{ "schoolId": 3, "following": t
 
 ## Notifications
 
-The learner's in-app inbox (the bell). All need `Authorization: Bearer <accessToken>`. There is no push to
+The in-app inbox (the bell), for learners and coaches. All need `Authorization: Bearer <accessToken>`. There is no push to
 phones: poll `GET /api/me/notifications/unread-count` for the badge (for example when the app opens or comes back
 to the foreground, and every minute or two while it is open).
 
 ### What creates a notification
 
-Only learners receive notifications, and never for something they did themselves.
+Learners receive the match, team and lineup ones; coaches (and admins) receive only the match invitation
+and goal confirmation ones. Nobody is notified of something they did themselves.
 
 | `type` | `category` (setting) | When | Who gets it |
 |---|---|---|---|
@@ -1170,6 +1265,12 @@ Only learners receive notifications, and never for something they did themselves
 | `squad_added` | `teamMembership` | The coach adds them to a team | That learner |
 | `squad_removed` | `teamMembership` | The coach removes them from a team | That learner |
 | `lineup_selected` | `lineupSelection` | Named as a starter or on the bench (`data.role`). A resubmitted lineup only tells players who are new to it or moved between starting and the bench | That learner |
+| `match_invitation_received` | `matchInvitations` | Another school invites their team to a match | The invited team's coach |
+| `match_invitation_accepted` | `matchInvitations` | Their invitation is accepted (`data.fixtureId` is the new match) | The inviting team's coach |
+| `match_invitation_declined` | `matchInvitations` | Their invitation is declined (`body` includes the reason, if given) | The inviting team's coach |
+| `match_invitation_cancelled` | `matchInvitations` | An invitation they received is withdrawn | The invited team's coach |
+| `goal_confirmation_needed` | `goalConfirmations` | During a live match, the other coach adds a goal (`data.goalId`, `data.teamId` the scoring team) | The other team's coach |
+| `goal_disputed` | `goalConfirmations` | The other coach disputes a goal they added (`body` includes the reason) | The coach whose side added it |
 
 A match's audience: active players of either team, and learners who favourite either team, follow either school
 or follow the competition. Favourite **sports** alone don't send notifications (that would be every match).
@@ -1185,7 +1286,8 @@ or follow the competition. Favourite **sports** alone don't send notifications (
 
 - Show `title` in bold and `body` underneath; both are ready to display. Times in them are South African.
 - Use `data` to open the right screen: `fixtureId` for match notifications (the match page), `teamId` for team ones.
-  Lineup ones have both, plus `role` (`starter` or `bench`).
+  Lineup ones have both, plus `role` (`starter` or `bench`). Match invitation ones have `matchInvitationId`
+  (open `GET /api/match-invitations/:id`), `homeTeamId`, `awayTeamId`, and `fixtureId` once accepted.
 
 ### GET /api/me/notifications?unread=true&limit=&offset=
 
@@ -1219,10 +1321,12 @@ Remove one from the inbox. Response: `{ "deleted": true, "unreadCount": 2 }`, or
 The toggles on the Notification settings screen. Everything is on until changed.
 
 ```json
-{ "settings": { "matchResults": true, "fixtureChanges": true, "teamMembership": true, "lineupSelection": true } }
+{ "settings": { "matchResults": true, "fixtureChanges": true, "teamMembership": true, "lineupSelection": true,
+  "matchInvitations": true, "goalConfirmations": true } }
 ```
 
-`PUT` takes any of the four as `true` or `false`; only those sent change. Response: the same as `GET`.
+`matchInvitations` and `goalConfirmations` only matter to coaches; show the other four to learners and just those
+two to coaches. `PUT` takes any of the six as `true` or `false`; only those sent change. Response: the same as `GET`.
 `400 NOTHING_TO_UPDATE` with none of them; `400 VALIDATION_ERROR` for anything but `true`/`false`.
 Turning a setting off stops new notifications of that kind; ones already in the inbox stay.
 
@@ -1344,6 +1448,87 @@ For the signup page: `{ "valid": true, "inviterName": "Sipho Williams", "schoolN
 
 ### Registering with an invitation
 Add `"inviteCode": "<code>"` to `POST /api/auth/register/coach`. A wrong or expired code never blocks signup; it is just ignored.
+
+## Inviting other schools to a match
+
+A coach invites another school's team to play. Nothing is scheduled until that team's coach accepts; accepting
+creates the fixture (and tells the players and followers, like any new fixture). This is for teams that are on
+Sportstures with a coach; to bring in a school that isn't, invite its coach first (see "Inviting coaches from
+other schools"). A coach can still schedule a home fixture directly with `POST /api/fixtures`.
+
+All routes need a coach's or admin's `Authorization: Bearer <accessToken>`; learners get `403`. Needs migration
+`018_match_invitations.sql`.
+
+### POST /api/match-invitations
+
+```json
+{ "opponentTeamId": 7, "matchDate": "2026-12-05T10:00:00+02:00", "venue": "Jeppe Main Field",
+  "playAt": "home", "matchType": "friendly", "competitionId": null, "message": "Pre-season friendly?" }
+```
+
+| Field | |
+|---|---|
+| `opponentTeamId` | Required. The team being invited (find it with `GET /api/teams?q=` or `GET /api/schools/:id`) |
+| `matchDate` | Required. ISO 8601 with a time zone, in the future |
+| `playAt` | `home` (default: you host) or `away` (they host) |
+| `venue` | Optional, up to 255 characters |
+| `matchType` | `friendly` (default), `league`, `semifinal` or `championship` |
+| `competitionId` | Optional |
+| `message` | Optional note to the other coach, up to 500 characters |
+| `teamId` | Your team. Coaches can leave it out; admins must send it |
+
+`201 { "invitation": {...} }`. The other coach gets a `match_invitation_received` notification.
+
+Errors: `400 MATCH_IN_PAST`, `400 SAME_TEAM`, `400 SPORT_MISMATCH`, `400 UNKNOWN_COMPETITION`, `400 NO_TEAM` (you have
+no team yet), `400 TEAM_REQUIRED` (admin without `teamId`), `403 FORBIDDEN` (`teamId` is not your team),
+`404 NOT_FOUND` (a team doesn't exist), `409 OPPONENT_HAS_NO_COACH` (nobody there to accept: offer to invite their
+coach instead), `409 INVITATION_EXISTS` (these two teams already have an open invitation for that time).
+
+### The invitation object
+
+```json
+{ "id": 12, "status": "pending", "direction": "received",
+  "matchDate": "2026-12-05T08:00:00.000Z", "venue": "Jeppe Main Field", "matchType": "friendly", "competition": null,
+  "message": "Pre-season friendly?",
+  "homeTeam": { "id": 3, "name": "Jeppe High Football 1st Team", "logoUrl": null, "sport": {...}, "school": {...}, ... },
+  "awayTeam": { "id": 7, ... },
+  "inviterTeam": { "id": 3, ... }, "invitedTeam": { "id": 7, ... },
+  "invitedBy": { "id": 85, "name": "Sipho Nkosi" },
+  "responseMessage": null, "respondedAt": null, "fixtureId": null,
+  "canRespond": true, "canCancel": false,
+  "createdAt": "...", "updatedAt": "..." }
+```
+
+- `status`: `pending`, `accepted` (`fixtureId` is set: open `GET /api/fixtures/:id`), `declined`, `cancelled`
+  (withdrawn by the inviter) or `expired` (still unanswered when the match time passed).
+- `direction`: `received` (your team was invited), `sent` (your team invited them), or `null` for an admin
+  looking at other teams' invitations.
+- `canRespond`: show Accept and Decline. `canCancel`: show Withdraw. Both are `false` once it's no longer pending.
+
+### GET /api/match-invitations?direction=&status=&teamId=&limit=&offset=
+
+Invitations to or from the teams you coach (admins: all, or one team's with `teamId`). Pending ones first,
+soonest match first, then the rest, most recently changed first.
+`direction` is `received` or `sent`; `status` is one of the statuses above; `limit` 1 to 100 (default 50).
+`{ "invitations": [...], "total": 4, "limit": 50, "offset": 0 }`. For an "Invitations" badge, use
+`?direction=received&status=pending` and read `total`.
+
+### GET /api/match-invitations/:id
+
+`{ "invitation": {...} }`. `404 NOT_FOUND` unless it involves one of your teams.
+
+### POST /api/match-invitations/:id/accept, POST /api/match-invitations/:id/decline
+
+The invited team's coach (or an admin). Optional body `{ "message": "See you there" }`, shown to the other coach
+as `responseMessage`. Response: `{ "invitation": {...} }`; after accepting, `fixtureId` is the new match.
+`403 FORBIDDEN` for the inviting side; `409 INVITATION_CLOSED` if it's no longer pending (already answered,
+withdrawn or expired).
+
+### POST /api/match-invitations/:id/cancel
+
+The inviting side withdraws an invitation that's still pending. Response: `{ "invitation": {...} }`.
+`403 FORBIDDEN` for the invited side; `409 INVITATION_CLOSED` if it's no longer pending. To call off a match
+that was already accepted, cancel the fixture instead (`PATCH /api/fixtures/:id` with `"status": "cancelled"`).
 
 ## Protecting a new route (for backend developers)
 

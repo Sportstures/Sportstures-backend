@@ -39,13 +39,23 @@ function mapTeam(row, p) {
   };
 }
 
-const FIXTURE_SELECT = `f.id, f.match_date, f.status, f.location AS venue, f.match_type,
+// While a match is live its score comes from the goals added so far (only confirmed ones count).
+// Other fixtures skip the lookup: CASE only runs it when the status is 'live'.
+const liveGoals = (teamColumn, status, aggregate) => `CASE WHEN f.status = 'live' THEN
+    (SELECT COALESCE(${aggregate}, 0)::int FROM fixture_goals g
+      WHERE g.fixture_id = f.id AND g.team_id = ${teamColumn} AND g.status = '${status}') END`;
+
+const FIXTURE_SELECT = `f.id, f.match_date, f.status, f.started_at, f.location AS venue, f.match_type,
     f.competition_id, comp.name AS competition_name,
     hmt.coach_id AS h_coach_id, hcu.id AS h_coach_user_id,
     amt.coach_id AS a_coach_id, acu.id AS a_coach_user_id,
     ${teamSelect('hmt', 'h')},
     ${teamSelect('amt', 'a')},
     sc.home_team_score, sc.away_team_score,
+    ${liveGoals('f.home_team_id', 'confirmed', 'sum(g.points)')} AS live_home_score,
+    ${liveGoals('f.away_team_id', 'confirmed', 'sum(g.points)')} AS live_away_score,
+    ${liveGoals('f.home_team_id', 'pending', 'count(*)')} AS live_home_pending,
+    ${liveGoals('f.away_team_id', 'pending', 'count(*)')} AS live_away_pending,
     EXISTS (SELECT 1 FROM fixture_reports fr WHERE fr.fixture_id = f.id) AS report_filed,
     EXISTS (SELECT 1 FROM fixture_lineups fl WHERE fl.fixture_id = f.id AND fl.team_id = f.home_team_id) AS home_lineup_submitted,
     EXISTS (SELECT 1 FROM fixture_lineups fl WHERE fl.fixture_id = f.id AND fl.team_id = f.away_team_id) AS away_lineup_submitted`;
@@ -68,6 +78,14 @@ function winnerOf(row) {
   return 'draw';
 }
 
+function scoreOf(row) {
+  if (row.status === 'live' && row.live_home_score !== undefined && row.live_home_score !== null) {
+    return { home: row.live_home_score, away: row.live_away_score };
+  }
+  if (row.home_team_score === null || row.home_team_score === undefined) return null;
+  return { home: row.home_team_score, away: row.away_team_score };
+}
+
 function mapFixture(row) {
   const homeTeam = mapTeam(row, 'h');
   const awayTeam = mapTeam(row, 'a');
@@ -81,9 +99,12 @@ function mapFixture(row) {
     sport: homeTeam.sport || awayTeam.sport,
     homeTeam,
     awayTeam,
-    score: row.home_team_score === null || row.home_team_score === undefined
-      ? null
-      : { home: row.home_team_score, away: row.away_team_score },
+    score: scoreOf(row),
+    // Live matches only: goals added but not yet confirmed by the other coach (not in `score`).
+    pendingGoals: row.status === 'live' && row.live_home_pending !== undefined
+      ? { home: row.live_home_pending || 0, away: row.live_away_pending || 0 }
+      : null,
+    startedAt: row.started_at || null,
     winner: winnerOf(row),
     reportFiled: Boolean(row.report_filed),
     lineupSubmitted: { home: Boolean(row.home_lineup_submitted), away: Boolean(row.away_lineup_submitted) },
