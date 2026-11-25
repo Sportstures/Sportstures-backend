@@ -707,10 +707,13 @@ Response: `{ "fixture": {...} }`. `404 NOT_FOUND` if missing.
   `UNKNOWN_COMPETITION`, and `404` for an unknown team.
 - Response `201`: `{ "fixture": {...} }`.
 
-### PATCH /api/fixtures/:id (home team's coach, or admin)
+### PATCH /api/fixtures/:id (either team's coach, or admin)
 
 Edit `matchDate`, `venue`, `competitionId`, `matchType`, or set `status` to `scheduled`, `postponed` or `cancelled`
 (this is the app's "Cancel fixture" action). Send only what changes; `null` clears `competitionId`.
+Both the home and the away coach can do this; the other team's coach is notified (`fixture_rescheduled`,
+`fixture_postponed` or `fixture_cancelled`), as are players and followers. A coach of neither team gets `403 FORBIDDEN`.
+Each coach sets their own team's lineup with `PUT /api/fixtures/:id/lineups/:teamId` (see Match lineups).
 `live` and `finished` cannot be set here; they come from match scoring.
 A live or finished fixture returns `409 FIXTURE_LOCKED`.
 
@@ -1250,8 +1253,9 @@ to the foreground, and every minute or two while it is open).
 
 ### What creates a notification
 
-Learners receive the match, team and lineup ones; coaches (and admins) receive only the match invitation
-and goal confirmation ones. Nobody is notified of something they did themselves.
+Learners receive the match, team and lineup ones. Coaches (and admins) receive the match invitation and goal
+confirmation ones, and the `fixtureChanges` ones for their own team's matches (the other coach scheduled, moved,
+postponed or cancelled one). Nobody is notified of something they did themselves.
 
 | `type` | `category` (setting) | When | Who gets it |
 |---|---|---|---|
@@ -1325,8 +1329,8 @@ The toggles on the Notification settings screen. Everything is on until changed.
   "matchInvitations": true, "goalConfirmations": true } }
 ```
 
-`matchInvitations` and `goalConfirmations` only matter to coaches; show the other four to learners and just those
-two to coaches. `PUT` takes any of the six as `true` or `false`; only those sent change. Response: the same as `GET`.
+`matchInvitations` and `goalConfirmations` only matter to coaches. Show learners the first four; show coaches
+`fixtureChanges`, `matchInvitations` and `goalConfirmations`. `PUT` takes any of the six as `true` or `false`; only those sent change. Response: the same as `GET`.
 `400 NOTHING_TO_UPDATE` with none of them; `400 VALIDATION_ERROR` for anything but `true`/`false`.
 Turning a setting off stops new notifications of that kind; ones already in the inbox stay.
 

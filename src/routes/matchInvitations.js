@@ -291,8 +291,9 @@ router.post('/:id/accept', [idParam, messageRule('message')], validate, async (r
     if (!done) return;
     const invitation = mapInvitation(done.after, req.user);
     await notify.matchInvitation('match_invitation_accepted', invitation, inviterCoachOf(done.after), req.user.id);
-    // The new match reaches players and followers like any scheduled fixture.
-    await notify.fixtureScheduled(invitation.fixtureId, req.user.id);
+    // The new match reaches players and followers like any scheduled fixture. Both coaches already
+    // know from the invitation itself.
+    await notify.fixtureScheduled(invitation.fixtureId, [req.user.id, done.after.h_coach_user_id, done.after.a_coach_user_id]);
     res.json({ invitation });
   } catch (err) {
     next(err);

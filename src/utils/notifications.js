@@ -9,8 +9,10 @@ const { FIXTURE_SELECT, FIXTURE_FROM, mapFixture } = require('./serializers');
 // Each setting (a toggle in the app) and the notification types it covers.
 const CATEGORIES = {
   matchResults: { column: 'match_results', types: ['match_result'] },
+  // Coaches get these too, for their own team's matches: the other coach scheduled, moved or cancelled one.
   fixtureChanges: {
     column: 'fixture_changes',
+    roles: ['learner', 'coach', 'admin'],
     types: ['fixture_scheduled', 'fixture_rescheduled', 'fixture_postponed', 'fixture_cancelled'],
   },
   teamMembership: {
@@ -61,12 +63,14 @@ const fixtureData = (f) => ({
 // Saves one notification for every listed person whose setting for this type is on. Only learners
 // receive them, unless the category names other roles.
 // recipients is a SQL subquery returning user ids (with $1, $2... from recipientParams), or a list of ids.
+// exceptUserId: one id, or a list of ids, who never get it (whoever caused it).
 async function insert(type, { title, body, data }, recipients, recipientParams = [], exceptUserId = null) {
+  const except = [].concat(exceptUserId).filter(Boolean);
   const { column, roles = ['learner'] } = CATEGORIES[CATEGORY_OF[type]];
   const list = Array.isArray(recipients);
   const params = list ? [recipients] : [...recipientParams];
   const source = list ? 'SELECT unnest($1::int[])' : recipients;
-  params.push(roles, type, title, body || null, JSON.stringify(data || {}), exceptUserId);
+  params.push(roles, type, title, body || null, JSON.stringify(data || {}), except);
   const n = params.length;
   const { rowCount } = await pool.query(
     `INSERT INTO notifications (user_id, type, title, body, data)
@@ -75,17 +79,19 @@ async function insert(type, { title, body, data }, recipients, recipientParams =
        JOIN roles r ON r.id = u.role_id AND r.name = ANY($${n - 5}::text[])
        LEFT JOIN notification_settings ns ON ns.user_id = u.id
       WHERE u.id IN (${source})
-        AND u.id IS DISTINCT FROM $${n}::int
+        AND u.id <> ALL($${n}::int[])
         AND COALESCE(ns.${column}, TRUE)`,
     params
   );
   return rowCount;
 }
 
-// Learners who care about a fixture: players on either team, and anyone who favourites either team,
-// follows either school or follows the competition.
+// People who care about a fixture: both teams' coaches, players on either team, and anyone who
+// favourites either team, follows either school or follows the competition. (insert() then keeps only
+// the roles the notification type is for: coaches only get fixture changes.)
 const FIXTURE_AUDIENCE = `
-  SELECT user_id FROM team_members WHERE status = 'active' AND team_id = ANY($1::int[])
+  SELECT coach_id FROM teams WHERE coach_id IS NOT NULL AND id = ANY($1::int[])
+  UNION SELECT user_id FROM team_members WHERE status = 'active' AND team_id = ANY($1::int[])
   UNION SELECT user_id FROM user_favorite_teams WHERE team_id = ANY($1::int[])
   UNION SELECT user_id FROM user_followed_schools WHERE school_id = ANY($2::int[])
   UNION SELECT user_id FROM competition_follows WHERE competition_id = $3`;
@@ -108,6 +114,8 @@ const safely = (fn) => async (...args) => {
 
 // ------------------------------------------------------------------ fixtures
 
+// actorId: the person who scheduled it, or a list (an accepted match invitation leaves out both coaches,
+// who already got the invitation's own notifications).
 const fixtureScheduled = safely(async (fixtureId, actorId) => {
   const f = await loadFixture(fixtureId);
   if (!f) return 0;

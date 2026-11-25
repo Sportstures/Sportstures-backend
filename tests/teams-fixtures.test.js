@@ -214,7 +214,8 @@ test('edit, cancel and lock a fixture', async () => {
   assert.equal(edited.body.fixture.matchDate, '2026-11-07T08:30:00.000Z');
   assert.equal(edited.body.fixture.matchType, 'friendly', 'fields not sent stay as they were');
 
-  assert.equal((await t.api('PATCH', `/api/fixtures/${fixture1.id}`, { venue: 'x' }, coachB.token)).status, 403, 'away coach cannot edit');
+  assert.equal((await t.api('PATCH', `/api/fixtures/${fixture1.id}`, { venue: 'x' }, coachC.token)).status, 403, 'a coach of neither team cannot edit');
+  assert.equal((await t.api('PATCH', `/api/fixtures/${fixture1.id}`, { venue: 'x' }, learner.token)).status, 403);
   assert.equal((await t.api('PATCH', `/api/fixtures/${fixture1.id}`, { status: 'live' }, coachA.token)).status, 400, 'live comes from scoring');
 
   const cancelled = await t.api('PATCH', `/api/fixtures/${fixture1.id}`, { status: 'cancelled' }, coachA.token);
