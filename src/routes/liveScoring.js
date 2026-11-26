@@ -138,6 +138,7 @@ router.post('/:id/start', coachOrAdmin, [idParam], validate, async (req, res, ne
       return true;
     }, { allowStatuses: ['scheduled'] });
     if (!done) return;
+    await notify.matchStarted(done.f.id, req.user.id);
     res.json(await goalsBody(req.params.id, req.user));
   } catch (err) {
     next(err);
@@ -199,6 +200,8 @@ router.post(
       const goal = result.goals.find((g) => g.id === done.result);
       if (adderTeamId) {
         await notify.goal('goal_confirmation_needed', goal, done.f.id, coachOf(done.f, otherTeam(done.f, adderTeamId)), req.user.id);
+      } else {
+        await notify.goalScored(goal, done.f.id, req.user.id); // an admin's goal counts straight away
       }
       res.status(201).json({ goal, ...result });
     } catch (err) {
@@ -237,7 +240,9 @@ router.post('/:id/goals/:goalId/confirm', coachOrAdmin, [idParam, goalIdParam], 
     });
     if (!done) return;
     const result = await goalsBody(done.f.id, req.user);
-    res.json({ goal: result.goals.find((g) => g.id === done.result), ...result });
+    const goal = result.goals.find((g) => g.id === done.result);
+    await notify.goalScored(goal, done.f.id, req.user.id);
+    res.json({ goal, ...result });
   } catch (err) {
     next(err);
   }
@@ -288,11 +293,17 @@ router.delete('/:id/goals/:goalId', coachOrAdmin, [idParam, goalIdParam], valida
       if (req.user.role !== 'admin' && adder !== req.user.id) {
         return fail(403, 'FORBIDDEN', 'Only the coach who added this goal can remove it');
       }
+      // Kept for the notification: learners only heard about it if it had counted.
+      const { rows: [removed] } = await client.query(`${GOAL_SELECT} WHERE g.id = $1`, [g.id]);
       await client.query('DELETE FROM fixture_goals WHERE id = $1', [g.id]);
-      return true;
+      return removed;
     });
     if (!done) return;
-    res.json(await goalsBody(done.f.id, req.user));
+    const result = await goalsBody(done.f.id, req.user);
+    if (done.result.status === 'confirmed') {
+      await notify.goalRemoved(mapGoal(done.result, done.f, req.user), done.f.id, req.user.id);
+    }
+    res.json(result);
   } catch (err) {
     next(err);
   }

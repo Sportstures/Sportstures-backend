@@ -20,6 +20,8 @@ const CATEGORIES = {
     types: ['join_approved', 'join_declined', 'squad_added', 'squad_removed'],
   },
   lineupSelection: { column: 'lineup_selection', types: ['lineup_selected'] },
+  // For learners following a match: it kicked off, a goal was confirmed, or a confirmed goal was removed.
+  liveMatches: { column: 'live_matches', types: ['match_started', 'goal_scored', 'goal_removed'] },
   // For coaches: another school invites their team to a match, or answers their invitation.
   matchInvitations: {
     column: 'match_invitations',
@@ -246,6 +248,43 @@ const goal = safely(async (type, goalObject, fixtureId, recipientUserId, actorId
   }, [recipientUserId], [], actorId);
 });
 
+// ------------------------------------------------------------------ live matches (for learners)
+
+const scoreLine = (f) => `${f.homeTeam.name} ${f.score ? f.score.home : 0} - ${f.score ? f.score.away : 0} ${f.awayTeam.name}`;
+const goalDetail = (g) => [g.minute !== null && g.minute !== undefined ? `${g.minute}'` : null,
+  g.player && g.player.name, g.points > 1 ? `${g.points} points` : null];
+
+const matchStarted = safely(async (fixtureId, actorId) => {
+  const f = await loadFixture(fixtureId);
+  if (!f) return 0;
+  return toFixtureAudience(f, 'match_started', {
+    title: `Kick-off: ${matchup(f)}`,
+    body: [f.venue, f.competition && f.competition.name].filter(Boolean).join(' · ') || 'The match is live',
+  }, actorId);
+});
+
+// goalObject: as the live scoring routes return it. Sent when a goal starts counting (confirmed), so a
+// goal that is later disputed never reaches learners. The fixture's score already includes it.
+const goalScored = safely(async (goalObject, fixtureId, actorId) => {
+  const f = await loadFixture(fixtureId);
+  if (!f || f.status !== 'live') return 0;
+  return toFixtureAudience(f, 'goal_scored', {
+    title: `Goal ${goalObject.team.name}: ${scoreLine(f)}`,
+    body: goalDetail(goalObject).filter(Boolean).join(' · ') || null,
+  }, actorId);
+});
+
+// A goal that had counted was taken away; the score has already dropped.
+const goalRemoved = safely(async (goalObject, fixtureId, actorId) => {
+  const f = await loadFixture(fixtureId);
+  if (!f || f.status !== 'live') return 0;
+  return toFixtureAudience(f, 'goal_removed', {
+    title: `Goal ruled out: ${goalObject.team.name}`,
+    body: [...goalDetail(goalObject), `Now ${scoreLine(f)}`].filter(Boolean).join(' · '),
+  }, actorId);
+});
+
 module.exports = {
   CATEGORIES, CATEGORY_OF, fixtureScheduled, fixtureChanged, matchResult, membership, lineupSelected, matchInvitation, goal,
+  matchStarted, goalScored, goalRemoved,
 };

@@ -1269,6 +1269,9 @@ postponed or cancelled one). Nobody is notified of something they did themselves
 | `squad_added` | `teamMembership` | The coach adds them to a team | That learner |
 | `squad_removed` | `teamMembership` | The coach removes them from a team | That learner |
 | `lineup_selected` | `lineupSelection` | Named as a starter or on the bench (`data.role`). A resubmitted lineup only tells players who are new to it or moved between starting and the bench | That learner |
+| `match_started` | `liveMatches` | A coach starts the match (title "Kick-off: A v B") | The match's audience |
+| `goal_scored` | `liveMatches` | A goal starts counting: the other coach confirms it, or an admin adds it. Title has the new score, e.g. "Goal Jeppe Football: Jeppe Football 1 - 0 Greenwood Football"; body has the minute and scorer. Pending and disputed goals are never sent, and goals confirmed automatically at full time aren't either (the result covers them) | The match's audience |
+| `goal_removed` | `liveMatches` | A goal that had counted is deleted ("Goal ruled out"); body has the new score | The match's audience |
 | `match_invitation_received` | `matchInvitations` | Another school invites their team to a match | The invited team's coach |
 | `match_invitation_accepted` | `matchInvitations` | Their invitation is accepted (`data.fixtureId` is the new match) | The inviting team's coach |
 | `match_invitation_declined` | `matchInvitations` | Their invitation is declined (`body` includes the reason, if given) | The inviting team's coach |
@@ -1290,7 +1293,8 @@ or follow the competition. Favourite **sports** alone don't send notifications (
 
 - Show `title` in bold and `body` underneath; both are ready to display. Times in them are South African.
 - Use `data` to open the right screen: `fixtureId` for match notifications (the match page), `teamId` for team ones.
-  Lineup ones have both, plus `role` (`starter` or `bench`). Match invitation ones have `matchInvitationId`
+  Lineup ones have both, plus `role` (`starter` or `bench`). Live match ones have `fixtureId`: open the live match
+  screen (`GET /api/fixtures/:id/goals`). Match invitation ones have `matchInvitationId`
   (open `GET /api/match-invitations/:id`), `homeTeamId`, `awayTeamId`, and `fixtureId` once accepted.
 
 ### GET /api/me/notifications?unread=true&limit=&offset=
@@ -1326,11 +1330,11 @@ The toggles on the Notification settings screen. Everything is on until changed.
 
 ```json
 { "settings": { "matchResults": true, "fixtureChanges": true, "teamMembership": true, "lineupSelection": true,
-  "matchInvitations": true, "goalConfirmations": true } }
+  "liveMatches": true, "matchInvitations": true, "goalConfirmations": true } }
 ```
 
-`matchInvitations` and `goalConfirmations` only matter to coaches. Show learners the first four; show coaches
-`fixtureChanges`, `matchInvitations` and `goalConfirmations`. `PUT` takes any of the six as `true` or `false`; only those sent change. Response: the same as `GET`.
+Show learners `matchResults`, `fixtureChanges`, `teamMembership`, `lineupSelection` and `liveMatches`; show
+coaches `fixtureChanges`, `matchInvitations` and `goalConfirmations`. `PUT` takes any of the seven as `true` or `false`; only those sent change. Response: the same as `GET`.
 `400 NOTHING_TO_UPDATE` with none of them; `400 VALIDATION_ERROR` for anything but `true`/`false`.
 Turning a setting off stops new notifications of that kind; ones already in the inbox stay.
 
