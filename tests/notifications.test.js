@@ -53,7 +53,7 @@ test('an empty inbox, everything switched on, and a login is needed', async () =
     notifications: [], unreadCount: 0, total: 0, limit: 20, offset: 0, hasMore: false,
   });
   const settings = await t.api('GET', '/api/me/notifications/settings', undefined, stranger.token);
-  assert.deepEqual(settings.body.settings, { matchResults: true, fixtureChanges: true, teamMembership: true, lineupSelection: true, matchInvitations: true, goalConfirmations: true });
+  assert.deepEqual(settings.body.settings, { matchResults: true, fixtureChanges: true, teamMembership: true, lineupSelection: true, matchInvitations: true, goalConfirmations: true, liveMatches: true });
   assert.equal((await t.api('GET', '/api/me/notifications')).status, 401);
   assert.equal((await t.api('GET', '/api/me/notifications/unread-count')).status, 401);
 });
@@ -123,7 +123,7 @@ test('postponing, moving and cancelling a fixture are each announced once', asyn
 test('results reach followers; turning match results off stops them', async () => {
   const off = await t.api('PUT', '/api/me/notifications/settings', { matchResults: false }, quiet.token);
   assert.equal(off.status, 200, JSON.stringify(off.body));
-  assert.deepEqual(off.body.settings, { matchResults: false, fixtureChanges: true, teamMembership: true, lineupSelection: true, matchInvitations: true, goalConfirmations: true });
+  assert.deepEqual(off.body.settings, { matchResults: false, fixtureChanges: true, teamMembership: true, lineupSelection: true, matchInvitations: true, goalConfirmations: true, liveMatches: true });
 
   const fx = await schedule(coachA, teamA, teamB, '2026-01-10T08:00:00Z');
   const scored = await t.api('PUT', `/api/fixtures/${fx.id}/result`, { homeScore: 2, awayScore: 1 }, coachA.token);
@@ -199,7 +199,7 @@ test('settings validation', async () => {
   assert.equal((await put({})).body.error.code, 'NOTHING_TO_UPDATE');
   assert.equal((await put({ lineupSelection: 'no' })).status, 400);
   const res = await put({ lineupSelection: false, fixtureChanges: false });
-  assert.deepEqual(res.body.settings, { matchResults: true, fixtureChanges: false, teamMembership: true, lineupSelection: false, matchInvitations: true, goalConfirmations: true });
+  assert.deepEqual(res.body.settings, { matchResults: true, fixtureChanges: false, teamMembership: true, lineupSelection: false, matchInvitations: true, goalConfirmations: true, liveMatches: true });
   const back = await put({ fixtureChanges: true });
   assert.equal(back.body.settings.fixtureChanges, true);
   assert.equal(back.body.settings.lineupSelection, false, 'others are kept');
