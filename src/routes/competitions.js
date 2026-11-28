@@ -49,8 +49,11 @@ function mapCompetition(r) {
   };
 }
 
+// Admins can edit any competition; a coach only the ones they created.
+const canEdit = (user, row) => Boolean(user) && (user.role === 'admin' || row.created_by === user.id);
+
 // The full card for each competition row: status, region, age group, dates, teams, rounds, leader,
-// and whether the signed-in person follows it.
+// whether the signed-in person follows it, and whether they may edit it.
 async function describeAll(rows, user) {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
@@ -98,6 +101,7 @@ async function describeAll(rows, user) {
     ...mapCompetition(r),
     ...describe(r, byCompetition.get(r.id), teams, today.rows[0].today),
     following: followed.has(r.id),
+    canEdit: canEdit(user, r),
   }));
 }
 
@@ -313,7 +317,7 @@ router.patch(
     try {
       const row = await loadOne(req.params.id);
       if (!row) return res.status(404).json(errorBody('NOT_FOUND', 'Competition not found'));
-      if (req.user.role !== 'admin' && row.created_by !== req.user.id) {
+      if (!canEdit(req.user, row)) {
         return res.status(403).json(errorBody('FORBIDDEN', 'Only the coach who created this competition can edit it'));
       }
       if (await unknownSport(req.body.sportId)) return res.status(400).json(errorBody('UNKNOWN_SPORT', 'Unknown sportId'));
