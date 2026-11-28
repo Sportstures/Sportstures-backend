@@ -592,11 +592,14 @@ The learner Competitions screen. Public; send a token to get `following` for tha
     "leader": { "name": "Oakridge High", "points": 9, "decidedBy": "table",
                 "team": { "id": 12, "name": "Oakridge Football", "level": "1st_team", "genderCategory": "boys", "ageGroup": "Open" },
                 "school": { "id": 5, "name": "Oakridge High", "province": "Western Cape", "town": "Stellenbosch" } },
-    "following": false
+    "following": false,
+    "canEdit": false
   }]
 }
 ```
 
+- `canEdit` is `true` when the signed-in person may change the competition (the coach who created it, or an
+  admin); always `false` without a token.
 - `counts` uses every filter except `status`, so each tab can show its number.
 - Order: ongoing (earliest start first), upcoming (soonest first), completed (latest end first).
 - `status`:

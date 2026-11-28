@@ -141,3 +141,14 @@ test('only the competition\'s creator (or an admin) can change its rules', async
   const res = await t.api('PATCH', `/api/competitions/${comp.id}`, { pointsWin: 5 }, other.token);
   assert.equal(res.status, 403);
 });
+
+test('a competition card says whether the person asking may edit it', async () => {
+  const comp = (await create({})).body.competition;
+  assert.equal(comp.canEdit, true, 'its creator');
+  const read = async (token) => (await t.api('GET', `/api/competitions/${comp.id}`, undefined, token)).body.competition.canEdit;
+  assert.equal(await read(coach.token), true);
+  assert.equal(await read(other.token), false);
+  assert.equal(await read(undefined), false);
+  const listed = (await t.api('GET', '/api/competitions', undefined, coach.token)).body.competitions;
+  assert.equal(listed.find((c) => c.id === comp.id).canEdit, true);
+});
